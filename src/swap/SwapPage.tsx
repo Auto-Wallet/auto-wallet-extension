@@ -388,6 +388,14 @@ export function SwapPage() {
     const mySeq = ++pollSeqRef.current;
     setStatusPolling(true);
     const MAX_ATTEMPTS = 120; // 5s × 120 = 10 min
+    // Errors here are treated as transient: source tx may not be indexed yet,
+    // the chain may be slow to mine, or the status endpoint may be having a
+    // blip. Distinguishing terminal vs transient is the provider's job — it
+    // owns the API semantics and turns known terminal failures (e.g. XFlows'
+    // "Tx Failed") into NeutralStatus{state:'failed'} so they short-circuit
+    // here as a non-pending state. Counting raw throws in this loop would
+    // mis-fire on long indexer lags / 30s network blips and falsely fail
+    // real pending swaps.
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       if (mySeq !== pollSeqRef.current) return; // superseded by a newer swap
       try {
@@ -399,7 +407,7 @@ export function SwapPage() {
           return;
         }
       } catch {
-        // Source tx may not be indexed yet — keep polling silently.
+        // Silent retry — see comment above.
       }
       if (i < MAX_ATTEMPTS - 1) {
         await new Promise((r) => setTimeout(r, 5000));

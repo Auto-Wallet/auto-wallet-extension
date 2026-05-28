@@ -1,4 +1,4 @@
-import { test, expect, describe } from 'bun:test';
+import { test, expect, describe, afterEach } from 'bun:test';
 import {
   isEvmChainId,
   isNativeAddress,
@@ -8,7 +8,11 @@ import {
   type ProviderToken,
   type QuoteSlot,
 } from '../src/lib/swap';
-import { toNeutralQuote } from '../src/lib/swap/xflows-provider';
+import {
+  isXFlowsTerminalError,
+  toNeutralQuote,
+  XFlowsProvider,
+} from '../src/lib/swap/xflows-provider';
 import type { XfQuote } from '../src/lib/xflows';
 
 describe('swap/types EVM filter', () => {
@@ -205,6 +209,84 @@ describe('XFlows rubic extraData → neutral quote', () => {
     expect(q.fees[0]?.label).toBe('DEX fee');
     expect(q.fees[0]?.amount).toBe('0.30%');
     expect(q.fees[0]?.symbol).toBe('USDC');
+  });
+});
+
+describe('XFlows status terminal-error classifier', () => {
+  test('messages naming an on-chain failure are terminal', () => {
+    expect(isXFlowsTerminalError('Tx Failed')).toBe(true);
+    expect(isXFlowsTerminalError('tx failed')).toBe(true);
+    expect(isXFlowsTerminalError('Transaction Failed: out of gas')).toBe(true);
+    expect(isXFlowsTerminalError('execution reverted')).toBe(true);
+  });
+
+  test('transient or unrelated errors are not terminal', () => {
+    expect(isXFlowsTerminalError('XFlows /status HTTP 500')).toBe(false);
+    expect(isXFlowsTerminalError('Tx not found')).toBe(false);
+    expect(isXFlowsTerminalError('fetch failed')).toBe(false);
+    expect(isXFlowsTerminalError('')).toBe(false);
+  });
+});
+
+describe('XFlowsProvider.getStatus error handling', () => {
+  // Stash & restore global fetch so each test can stage a different response
+  // for the /status endpoint without leaking into other tests.
+  const realFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = realFetch; });
+
+  const wan: ProviderToken = {
+    chainId: 888, address: NATIVE_TOKEN_ADDRESS,
+    symbol: 'WAN', name: 'Wanchain', decimals: 18, logo: '',
+  };
+  const ftt: ProviderToken = {
+    chainId: 888, address: '0x11e77e27af5539872efed10abaa0b408cfd9fbbd',
+    symbol: 'FTT', name: 'FTT', decimals: 18, logo: '',
+  };
+  const params = {
+    fromChainId: 888, toChainId: 888,
+    fromToken: wan, toToken: ftt,
+    fromAddress: '0x2fb4D46372Ea1748ec3c29Bd2C7B536019DF5200',
+    toAddress: '0x2fb4D46372Ea1748ec3c29Bd2C7B536019DF5200',
+    fromAmount: '20', slippage: 0.01,
+  };
+  const sourceHash = '0xb8ba57430bd7eed972e0bf2e5ff3cf44513f377343cbf1f82aeca2729232d5eb';
+
+  test('maps {success:false, error:"Tx Failed"} to a failed NeutralStatus instead of throwing', async () => {
+    // Repro of the user's bug: XFlows answers HTTP 200 but signals an on-chain
+    // revert. The provider must surface this as state:'failed' so the poller
+    // stops, rather than re-throwing and letting the UI spin forever.
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ success: false, error: 'Tx Failed' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )) as unknown as typeof fetch;
+
+    const provider = new XFlowsProvider();
+    const status = await provider.getStatus({ params, sourceHash });
+    expect(status.state).toBe('failed');
+    expect(status.message).toBe('Tx Failed');
+    expect(status.sourceHash).toBe(sourceHash);
+    expect(status.receiveSymbol).toBe('FTT');
+  });
+
+  test('re-throws transient HTTP errors so the poller keeps retrying', async () => {
+    // 503 / network blip should bubble up — pollSwapStatus uses the throw as
+    // its retry signal during the indexing-grace window.
+    globalThis.fetch = (async () => new Response('Service Unavailable', { status: 503 })) as unknown as typeof fetch;
+
+    const provider = new XFlowsProvider();
+    await expect(provider.getStatus({ params, sourceHash })).rejects.toThrow(/HTTP 503/);
+  });
+
+  test('re-throws non-terminal business errors (e.g. tx not yet indexed)', async () => {
+    // Anything XFlows reports that doesn't unambiguously mean "the source tx
+    // failed on-chain" should keep the poller retrying.
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ success: false, error: 'Tx not found' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )) as unknown as typeof fetch;
+
+    const provider = new XFlowsProvider();
+    await expect(provider.getStatus({ params, sourceHash })).rejects.toThrow(/Tx not found/);
   });
 });
 

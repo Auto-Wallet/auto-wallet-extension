@@ -101,18 +101,46 @@ export class XFlowsProvider implements SwapProvider {
   }
 
   async getStatus({ params, sourceHash }: StatusArgs): Promise<NeutralStatus> {
-    const status = await xfGetStatus({
-      fromChainId: params.fromChainId,
-      toChainId: params.toChainId,
-      fromTokenAddress: params.fromToken.address,
-      toTokenAddress: params.toToken.address,
-      fromAddress: params.fromAddress,
-      toAddress: params.toAddress,
-      fromAmount: params.fromAmount,
-      hash: sourceHash,
-    });
-    return toNeutralStatus(status, params, sourceHash);
+    try {
+      const status = await xfGetStatus({
+        fromChainId: params.fromChainId,
+        toChainId: params.toChainId,
+        fromTokenAddress: params.fromToken.address,
+        toTokenAddress: params.toToken.address,
+        fromAddress: params.fromAddress,
+        toAddress: params.toAddress,
+        fromAmount: params.fromAmount,
+        hash: sourceHash,
+      });
+      return toNeutralStatus(status, params, sourceHash);
+    } catch (e: unknown) {
+      // XFlows answers HTTP 200 + {success:false, error:"Tx Failed"} when the
+      // source tx is on-chain but reverted. lib/xflows turns that into a
+      // throw, but it's a terminal state, not an indexing delay — surface it
+      // as a failed NeutralStatus so the poller stops and the UI shows the
+      // failure. Anything else we re-throw so the poller keeps retrying.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isXFlowsTerminalError(msg)) {
+        return {
+          state: 'failed',
+          message: msg,
+          sourceHash,
+          receiveSymbol: params.toToken.symbol,
+        };
+      }
+      throw e;
+    }
   }
+}
+
+// Exported for testing. Treats messages that indicate the source tx itself
+// failed on-chain as terminal; everything else (network errors, "not found"
+// while indexing) stays transient and lets the caller retry.
+export function isXFlowsTerminalError(message: string): boolean {
+  const m = message.toLowerCase();
+  return m.includes('tx failed')
+    || m.includes('transaction failed')
+    || m.includes('reverted');
 }
 
 // Exported for direct testing (see tests/swap-provider.test.ts).
