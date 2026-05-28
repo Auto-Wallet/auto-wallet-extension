@@ -388,38 +388,26 @@ export function SwapPage() {
     const mySeq = ++pollSeqRef.current;
     setStatusPolling(true);
     const MAX_ATTEMPTS = 120; // 5s × 120 = 10 min
-    // Early polls can fail because the source tx isn't indexed yet — that's
-    // expected. But once we've seen this many *consecutive* errors with no
-    // successful response, we should stop pretending the swap is still in
-    // flight and surface the error to the UI.
-    const MAX_CONSECUTIVE_ERRORS = 6; // ~30s of indexing grace
-    let consecutiveErrors = 0;
-    let lastError = '';
+    // Errors here are treated as transient: source tx may not be indexed yet,
+    // the chain may be slow to mine, or the status endpoint may be having a
+    // blip. Distinguishing terminal vs transient is the provider's job — it
+    // owns the API semantics and turns known terminal failures (e.g. XFlows'
+    // "Tx Failed") into NeutralStatus{state:'failed'} so they short-circuit
+    // here as a non-pending state. Counting raw throws in this loop would
+    // mis-fire on long indexer lags / 30s network blips and falsely fail
+    // real pending swaps.
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       if (mySeq !== pollSeqRef.current) return; // superseded by a newer swap
       try {
         const status = await provider.getStatus({ params, sourceHash: hash, requestId });
         if (mySeq !== pollSeqRef.current) return;
         setSwapStatus(status);
-        consecutiveErrors = 0;
-        lastError = '';
         if (status.state !== 'pending') {
           setStatusPolling(false);
           return;
         }
-      } catch (e: unknown) {
-        consecutiveErrors++;
-        lastError = e instanceof Error ? e.message : String(e);
-        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          if (mySeq !== pollSeqRef.current) return;
-          setSwapStatus({
-            state: 'failed',
-            message: `Unable to fetch swap status: ${lastError}`,
-            sourceHash: hash,
-          });
-          setStatusPolling(false);
-          return;
-        }
+      } catch {
+        // Silent retry — see comment above.
       }
       if (i < MAX_ATTEMPTS - 1) {
         await new Promise((r) => setTimeout(r, 5000));
