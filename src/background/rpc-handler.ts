@@ -24,7 +24,7 @@ import { notifyTx, notifySign } from '../lib/notify';
 import { emitChainChanged } from './events';
 import { RpcError, userRejection } from '../lib/rpc-error';
 import { validateSigner, validateRpcUrl, parseAddChainParams, parseTxParams } from '../lib/rpc-validation';
-import { bufferGas, clampEstimatedFees } from '../lib/gas';
+import { applyGasPolicy, clampEstimatedFees } from '../lib/gas';
 import { simulateTx, type SimulationPreview } from './bcs-simulation';
 import { preparePersonalSignParams, signPreparedPersonalMessage } from '../lib/signing';
 import { retryWithNextNonce } from '../lib/nonce';
@@ -259,22 +259,20 @@ async function checkWhitelistOrConfirm(
   };
 }
 
-// Resolve gas: estimate when not provided by dApp/parsed tx, then buffer ×1.2.
+// Resolve gas per the wallet's gas policy (see applyGasPolicy in lib/gas):
+// dApp/parsed-tx values are trusted verbatim, fresh estimates get the ×1.2
+// buffer.
 async function resolveTxGas(
   publicClient: PublicClient,
   parsed: ReturnType<typeof parseTxParams>,
   fromAddress: string,
 ): Promise<bigint> {
-  let baseGas = parsed.gasLimitBigInt;
-  if (baseGas === null) {
-    baseGas = await publicClient.estimateGas({
-      account: fromAddress as `0x${string}`,
-      to: parsed.to as `0x${string}` | undefined,
-      data: (parsed.data as `0x${string}`) ?? undefined,
-      value: parsed.valueBigInt,
-    });
-  }
-  return bufferGas(baseGas);
+  return applyGasPolicy(parsed.gasLimitBigInt, () => publicClient.estimateGas({
+    account: fromAddress as `0x${string}`,
+    to: parsed.to as `0x${string}` | undefined,
+    data: (parsed.data as `0x${string}`) ?? undefined,
+    value: parsed.valueBigInt,
+  }));
 }
 
 interface BuildLedgerTxArgs {

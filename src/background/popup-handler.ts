@@ -17,7 +17,7 @@ import type { Network } from '../types/network';
 import { type WalletSettings, DEFAULT_SETTINGS } from '../types/settings';
 import { emitAccountsChanged, emitChainChanged } from './events';
 import { toHex } from 'viem';
-import { bufferGas, clampEstimatedFees } from '../lib/gas';
+import { applyGasPolicy, clampEstimatedFees } from '../lib/gas';
 import { notifyTx } from '../lib/notify';
 import { retryWithNextNonce } from '../lib/nonce';
 import { openLedgerPickerWindow } from './ledger-picker-manager';
@@ -603,17 +603,23 @@ async function getFeeSuggestions(req: FeeSuggestionsRequest): Promise<FeeSuggest
     }
   }
 
-  // Estimate gas if we have enough info
+  // Estimate gas if we have enough info, then apply the same ×1.2 buffer the
+  // send path would apply when no explicit gas is supplied. Returning the
+  // buffered value here is load-bearing: FeeEditor auto-fills its gas input
+  // with this value and feeds it back as `feeOverride.gas`. The send path
+  // then trusts caller-provided gas verbatim (see resolveGas / resolveTxGas),
+  // so if we returned the raw estimate the 1.2x buffer would be silently
+  // dropped on every confirm-popup tx.
   let gasEstimate: bigint | null = null;
   if (req.to || req.data) {
     try {
       const fromAddr = req.from ?? (await keyManager.getAddress());
-      gasEstimate = await client.estimateGas({
+      gasEstimate = await applyGasPolicy(null, () => client.estimateGas({
         account: fromAddr as `0x${string}`,
         to: req.to as `0x${string}` | undefined,
         data: (req.data as `0x${string}`) ?? undefined,
         value: req.value ? hexToBigInt(req.value as `0x${string}`) : 0n,
-      });
+      }));
     } catch {
       gasEstimate = null;
     }
@@ -828,19 +834,20 @@ async function broadcastSignedTx({ rawTx, meta }: BroadcastArgs): Promise<{ hash
   return { hash };
 }
 
-// Resolve a gas limit: estimate when not provided, then buffer ×1.2.
+// Resolve a gas limit per the wallet's gas policy (see applyGasPolicy in
+// lib/gas): caller-supplied values are trusted verbatim, fresh estimates get
+// the ×1.2 buffer.
 async function resolveGas(
   client: Awaited<ReturnType<typeof getClient>>,
   providedGas: bigint | undefined,
   call: { from: string; to: string; data?: `0x${string}`; value: bigint },
 ): Promise<bigint> {
-  const base = providedGas ?? await client.estimateGas({
+  return applyGasPolicy(providedGas, () => client.estimateGas({
     account: call.from as `0x${string}`,
     to: call.to as `0x${string}`,
     data: call.data,
     value: call.value,
-  });
-  return bufferGas(base);
+  }));
 }
 
 // --- Tx receipt polling (shared with rpc-handler, but kept simple as a local helper) ---
