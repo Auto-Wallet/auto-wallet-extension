@@ -405,6 +405,7 @@ async function handleSendTransaction(params: unknown[], origin: string): Promise
   );
 
   let hash: `0x${string}`;
+  let effNonce: number | null = null;
   const effectiveData = txDataOverride ?? parsed.data;
   let effGas = finalGas;
   let effMaxFee = txMaxFee;
@@ -424,6 +425,7 @@ async function handleSendTransaction(params: unknown[], origin: string): Promise
       effMaxFee = preparedTxJson.maxFeePerGas ? BigInt(preparedTxJson.maxFeePerGas) : null;
       effPriority = preparedTxJson.maxPriorityFeePerGas ? BigInt(preparedTxJson.maxPriorityFeePerGas) : null;
       effGasPrice = preparedTxJson.gasPrice ? BigInt(preparedTxJson.gasPrice) : null;
+      effNonce = preparedTxJson.nonce;
     }
   } else {
     const account = await keyManager.getAccount();
@@ -444,6 +446,7 @@ async function handleSendTransaction(params: unknown[], origin: string): Promise
         address: account.address,
         blockTag: 'pending',
       });
+      effNonce = nonce;
       const txArgs: any = {
         to: parsed.to as `0x${string}`,
         value: parsed.valueBigInt,
@@ -477,6 +480,7 @@ async function handleSendTransaction(params: unknown[], origin: string): Promise
     autoSigned: autoSignResult.allowed,
     ruleId: autoSignResult.rule?.id,
     status: 'pending',
+    nonce: effNonce ?? undefined,
     gasLimit: effGas.toString(),
     maxFeePerGas: effMaxFee?.toString(),
     maxPriorityFeePerGas: effPriority?.toString(),
