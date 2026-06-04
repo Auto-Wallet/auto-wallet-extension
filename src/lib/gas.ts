@@ -108,3 +108,66 @@ export function computeReplacementFees(original: FeeFields, network?: FeeFields)
   const gasPrice = raise(bumpFee(original.gasPrice ?? 0n), network?.gasPrice);
   return { type: 'legacy', gasPrice };
 }
+
+/** Fee values edited by the user in the confirm popup (decimal-wei strings). */
+export interface ReplacementFeeOverride {
+  type: 'eip1559' | 'legacy';
+  gas: string | null;
+  maxFeePerGas: string | null;
+  maxPriorityFeePerGas: string | null;
+  gasPrice: string | null;
+}
+
+export interface ResolvedReplacementFees {
+  type: 'eip1559' | 'legacy';
+  gas: bigint;
+  maxFeePerGas: bigint | null;
+  maxPriorityFeePerGas: bigint | null;
+  gasPrice: bigint | null;
+}
+
+/**
+ * Merge the user's confirm-popup fee edits over the auto-computed replacement
+ * floor. Speed-up / cancel no longer auto-broadcast: the popup shows the bumped
+ * floor as an editable prefill, and whatever the user confirms flows back here.
+ *
+ * Every field prefers the user's value and falls back to the bumped floor, so an
+ * untouched field still clears the node's >10% replacement rule. `override` is
+ * null only when the popup's fee suggestions failed to load — then the bumped
+ * floor is used verbatim, exactly as the old auto path did.
+ */
+export function resolveReplacementFees(
+  bumped: ReplacementFees,
+  defaultGas: bigint,
+  override: ReplacementFeeOverride | null | undefined,
+): ResolvedReplacementFees {
+  const parse = (s: string | null | undefined): bigint | null => {
+    if (s === null || s === undefined || s === '') return null;
+    try {
+      return BigInt(s);
+    } catch {
+      return null;
+    }
+  };
+
+  const type = override?.type ?? bumped.type;
+  const gas = parse(override?.gas) ?? defaultGas;
+
+  if (type === 'eip1559') {
+    return {
+      type,
+      gas,
+      maxFeePerGas: parse(override?.maxFeePerGas) ?? bumped.maxFeePerGas ?? null,
+      maxPriorityFeePerGas: parse(override?.maxPriorityFeePerGas) ?? bumped.maxPriorityFeePerGas ?? null,
+      gasPrice: null,
+    };
+  }
+
+  return {
+    type,
+    gas,
+    maxFeePerGas: null,
+    maxPriorityFeePerGas: null,
+    gasPrice: parse(override?.gasPrice) ?? bumped.gasPrice ?? null,
+  };
+}

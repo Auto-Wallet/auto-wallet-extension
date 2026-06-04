@@ -202,7 +202,7 @@ export function HistoryPage() {
                   onClick={() => manageTx(entry, 'speedup')}
                   disabled={busyId === entry.id}
                   className="btn-ghost accent tx-action-btn"
-                  title="Re-send at a higher gas price to confirm sooner"
+                  title="Re-send at the same nonce — you set the gas price in the confirm popup"
                 >
                   <ZapIcon size={12} /> {busyId === entry.id ? 'Working…' : 'Speed Up'}
                 </button>
@@ -210,7 +210,7 @@ export function HistoryPage() {
                   onClick={() => manageTx(entry, 'cancel')}
                   disabled={busyId === entry.id}
                   className="btn-ghost danger tx-action-btn"
-                  title="Replace with a 0-value self-transfer to void this transaction"
+                  title="Replace with a 0-value self-transfer — you set the gas price in the confirm popup"
                 >
                   <BanIcon size={12} /> Revoke
                 </button>
@@ -218,7 +218,7 @@ export function HistoryPage() {
             )}
             {busyId === entry.id && (
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
-                Submitting replacement… (waiting on chain {entry.chainId} RPC)
+                Set the gas price and confirm in the popup window…
               </div>
             )}
             {rowMsg?.id === entry.id && busyId !== entry.id && (

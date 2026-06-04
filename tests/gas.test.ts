@@ -6,7 +6,9 @@ import {
   clampEstimatedFees,
   computeReplacementFees,
   floorPriorityFee,
+  resolveReplacementFees,
   MIN_PRIORITY_FEE_WEI,
+  type ReplacementFees,
 } from '../src/lib/gas';
 
 const GWEI = 1_000_000_000n;
@@ -162,4 +164,91 @@ test('computeReplacementFees output always beats the original by >10% (replaceme
     // maxFee must always cover priority
     expect(out.maxFeePerGas! >= out.maxPriorityFeePerGas!).toBe(true);
   }
+});
+
+// --- resolveReplacementFees: the user's confirm-popup edits win over the floor ---
+//
+// Speed-up / cancel no longer auto-broadcast. The popup prefills the bumped
+// floor, the user may edit it, and resolveReplacementFees merges the result.
+// These tests pin down that the USER's value is used when present, and the
+// bumped floor is used as the fallback — delete the merge and they go red.
+
+const EIP1559_FLOOR: ReplacementFees = {
+  type: 'eip1559',
+  maxFeePerGas: 50n * GWEI,
+  maxPriorityFeePerGas: 2n * GWEI,
+};
+const LEGACY_FLOOR: ReplacementFees = { type: 'legacy', gasPrice: 30n * GWEI };
+
+test('resolveReplacementFees uses the user-edited eip1559 values verbatim', () => {
+  const out = resolveReplacementFees(EIP1559_FLOOR, 21_000n, {
+    type: 'eip1559',
+    gas: '50000',
+    maxFeePerGas: (80n * GWEI).toString(),
+    maxPriorityFeePerGas: (5n * GWEI).toString(),
+    gasPrice: null,
+  });
+  expect(out.type).toBe('eip1559');
+  expect(out.gas).toBe(50_000n);
+  expect(out.maxFeePerGas).toBe(80n * GWEI);
+  expect(out.maxPriorityFeePerGas).toBe(5n * GWEI);
+  expect(out.gasPrice).toBeNull();
+});
+
+test('resolveReplacementFees uses the user-edited legacy gas price verbatim', () => {
+  const out = resolveReplacementFees(LEGACY_FLOOR, 21_000n, {
+    type: 'legacy',
+    gas: null,
+    maxFeePerGas: null,
+    maxPriorityFeePerGas: null,
+    gasPrice: (45n * GWEI).toString(),
+  });
+  expect(out.type).toBe('legacy');
+  expect(out.gas).toBe(21_000n); // gas null -> defaultGas
+  expect(out.gasPrice).toBe(45n * GWEI);
+  expect(out.maxFeePerGas).toBeNull();
+  expect(out.maxPriorityFeePerGas).toBeNull();
+});
+
+test('resolveReplacementFees falls back to the bumped floor per-field when an edit is blank', () => {
+  // User cleared maxFeePerGas but set priority; gas left blank.
+  const out = resolveReplacementFees(EIP1559_FLOOR, 30_000n, {
+    type: 'eip1559',
+    gas: '',
+    maxFeePerGas: null,
+    maxPriorityFeePerGas: (3n * GWEI).toString(),
+    gasPrice: null,
+  });
+  expect(out.gas).toBe(30_000n);            // blank gas -> defaultGas
+  expect(out.maxFeePerGas).toBe(50n * GWEI); // null -> floor
+  expect(out.maxPriorityFeePerGas).toBe(3n * GWEI); // edited value wins
+});
+
+test('resolveReplacementFees uses the bumped floor verbatim when override is null (suggestions failed)', () => {
+  const out = resolveReplacementFees(EIP1559_FLOOR, 21_000n, null);
+  expect(out.type).toBe('eip1559');
+  expect(out.gas).toBe(21_000n);
+  expect(out.maxFeePerGas).toBe(50n * GWEI);
+  expect(out.maxPriorityFeePerGas).toBe(2n * GWEI);
+  expect(out.gasPrice).toBeNull();
+
+  const legacy = resolveReplacementFees(LEGACY_FLOOR, 21_000n, undefined);
+  expect(legacy.type).toBe('legacy');
+  expect(legacy.gasPrice).toBe(30n * GWEI);
+});
+
+test('resolveReplacementFees follows the override type even when the floor differs', () => {
+  // Original was legacy, but the chain is now eip1559: the popup hands back an
+  // eip1559 override and that must drive the result.
+  const out = resolveReplacementFees(LEGACY_FLOOR, 21_000n, {
+    type: 'eip1559',
+    gas: null,
+    maxFeePerGas: (70n * GWEI).toString(),
+    maxPriorityFeePerGas: (2n * GWEI).toString(),
+    gasPrice: null,
+  });
+  expect(out.type).toBe('eip1559');
+  expect(out.maxFeePerGas).toBe(70n * GWEI);
+  expect(out.maxPriorityFeePerGas).toBe(2n * GWEI);
+  expect(out.gasPrice).toBeNull();
 });

@@ -18,7 +18,7 @@ import type { Network } from '../types/network';
 import { type WalletSettings, DEFAULT_SETTINGS } from '../types/settings';
 import { emitAccountsChanged, emitChainChanged } from './events';
 import { toHex } from 'viem';
-import { applyGasPolicy, clampEstimatedFees, computeReplacementFees } from '../lib/gas';
+import { applyGasPolicy, clampEstimatedFees, computeReplacementFees, resolveReplacementFees } from '../lib/gas';
 import { notifyTx } from '../lib/notify';
 import { retryWithNextNonce } from '../lib/nonce';
 import { openLedgerPickerWindow } from './ledger-picker-manager';
@@ -694,6 +694,10 @@ async function getChainFeeData(client: Awaited<ReturnType<typeof getClient>>): P
  * calldata, and the fees we must beat; if it already mined we refuse. The
  * existing history entry is updated in place (new hash + fees) and receipt
  * polling restarts on the replacement.
+ *
+ * This never auto-broadcasts: the confirm popup always opens so the user sets
+ * the replacement's gas price by hand. The +30% bump over the original is only
+ * the prefill/floor shown in the popup's fee editor.
  */
 /** Reject a slow network read so the UI gets a clear error instead of hanging. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -714,9 +718,9 @@ async function replacePendingTx(logId: string, kind: 'speedup' | 'cancel'): Prom
   if (entry.status !== 'pending') throw new Error('Only pending transactions can be sped up or cancelled');
   if (!entry.hash) throw new Error('Transaction has not been broadcast yet');
 
-  // Software keys sign in the background; Ledger signs on-device via the confirm
-  // popup. Use the active account's *address* for the ownership check so we don't
-  // call getAccount() (which throws) on the Ledger path.
+  // Both account types go through the confirm popup below; Ledger additionally
+  // signs on-device there. Use the active account's *address* for the ownership
+  // check so we don't call getAccount() (which throws) on the Ledger path.
   const info = await keyManager.getActiveAccountInfo();
   if (info.address.toLowerCase() !== entry.from.toLowerCase()) {
     throw new Error(
@@ -774,60 +778,73 @@ async function replacePendingTx(logId: string, kind: 'speedup' | 'cancel'): Prom
     : undefined;
   const gas = kind === 'speedup' ? original.gas : 21_000n; // 21000 = bare no-data transfer
 
-  console.log(`[Auto-Wallet] replacePendingTx: sending replacement (${info.type})`, {
+  // Speed up / cancel never auto-broadcast: open the confirm popup so the user
+  // sets the final gas price by hand. The bumped (+30%) fees are passed only as
+  // an editable prefill/floor suggestion — the node still enforces the >10%
+  // replacement rule when the user's chosen value is broadcast.
+  const toHexOrUndef = (v: bigint | undefined) => (v !== undefined ? toHex(v) : undefined);
+  const displayTx: Record<string, string | undefined> = {
+    from: info.address,
+    to,
+    value: toHex(value),
+    data,
+    gas: toHex(gas),
+    nonce: toHex(original.nonce),
+    maxFeePerGas: toHexOrUndef(bumped.maxFeePerGas),
+    maxPriorityFeePerGas: toHexOrUndef(bumped.maxPriorityFeePerGas),
+    gasPrice: toHexOrUndef(bumped.gasPrice),
+  };
+
+  // Ledger signs on-device inside the popup (WebHID is unavailable here) and
+  // returns the signed raw bytes; software keys sign in the background after the
+  // popup hands back the user's confirmed fee override.
+  const ledgerCtx = info.type === 'ledger'
+    ? {
+        derivationPath: info.derivationPath!,
+        txJson: {
+          type: bumped.type,
+          to,
+          value: value.toString(),
+          data,
+          gas: gas.toString(),
+          nonce: original.nonce,
+          chainId: entry.chainId,
+          maxFeePerGas: bumped.maxFeePerGas?.toString(),
+          maxPriorityFeePerGas: bumped.maxPriorityFeePerGas?.toString(),
+          gasPrice: bumped.gasPrice?.toString(),
+        },
+      }
+    : undefined;
+
+  console.log(`[Auto-Wallet] replacePendingTx: prompting user to confirm (${info.type})`, {
     nonce: original.nonce, to, type: bumped.type,
     maxFeePerGas: bumped.maxFeePerGas?.toString(),
     maxPriorityFeePerGas: bumped.maxPriorityFeePerGas?.toString(),
     gasPrice: bumped.gasPrice?.toString(),
   });
 
+  const { approved, signedRawTx, feeOverride, txDataOverride } = await requestUserConfirmation({
+    id: genId(),
+    method: 'eth_sendTransaction',
+    origin: `${entry.origin} · ${kind === 'cancel' ? 'Cancel' : 'Speed Up'}`,
+    params: [displayTx],
+    signerAddress: info.address,
+    chainId: entry.chainId,
+    chainName: network.name,
+    nativeSymbol: network.symbol,
+    ledger: ledgerCtx,
+  });
+  if (!approved) throw new Error(`${kind === 'cancel' ? 'Cancel' : 'Speed up'} was rejected`);
+
   let hash: `0x${string}`;
-  // Actual fees recorded in the log — the bumped values for software, or the
-  // real signed values for Ledger (the user may have edited them in the popup).
+  // Actual fees recorded in the log — the values the user confirmed (software),
+  // or the real signed values read back from the raw tx (Ledger).
   let logGas = gas;
   let logMaxFee = bumped.maxFeePerGas ?? null;
   let logPriority = bumped.maxPriorityFeePerGas ?? null;
   let logGasPrice = bumped.gasPrice ?? null;
 
   if (info.type === 'ledger') {
-    // On-device signing: hand a fully-prepared tx to the confirm popup, which
-    // talks to the Ledger over WebHID and returns the signed raw bytes.
-    const txJson = {
-      type: bumped.type,
-      to,
-      value: value.toString(),
-      data,
-      gas: gas.toString(),
-      nonce: original.nonce,
-      chainId: entry.chainId,
-      maxFeePerGas: bumped.maxFeePerGas?.toString(),
-      maxPriorityFeePerGas: bumped.maxPriorityFeePerGas?.toString(),
-      gasPrice: bumped.gasPrice?.toString(),
-    };
-    const toHexOrUndef = (v: bigint | undefined) => (v !== undefined ? toHex(v) : undefined);
-    const displayTx: Record<string, string | undefined> = {
-      from: info.address,
-      to,
-      value: toHex(value),
-      data,
-      gas: toHex(gas),
-      nonce: toHex(original.nonce),
-      maxFeePerGas: toHexOrUndef(bumped.maxFeePerGas),
-      maxPriorityFeePerGas: toHexOrUndef(bumped.maxPriorityFeePerGas),
-      gasPrice: toHexOrUndef(bumped.gasPrice),
-    };
-    const { approved, signedRawTx } = await requestUserConfirmation({
-      id: genId(),
-      method: 'eth_sendTransaction',
-      origin: `${entry.origin} · ${kind === 'cancel' ? 'Cancel' : 'Speed Up'}`,
-      params: [displayTx],
-      signerAddress: info.address,
-      chainId: entry.chainId,
-      chainName: network.name,
-      nativeSymbol: network.symbol,
-      ledger: { derivationPath: info.derivationPath!, txJson },
-    });
-    if (!approved) throw new Error('Ledger signing was rejected');
     if (!signedRawTx) throw new Error('Ledger did not return a signed transaction');
     hash = await withTimeout(
       publicClient.sendRawTransaction({ serializedTransaction: signedRawTx }),
@@ -845,16 +862,31 @@ async function replacePendingTx(logId: string, kind: 'speedup' | 'cancel'): Prom
       // keep the prepared values if the raw tx can't be parsed
     }
   } else {
+    // Software signing: use the fees the user confirmed in the popup, falling
+    // back to the bumped floor for any field they left blank.
     const account = await keyManager.getAccount();
-    const txArgs: any = { nonce: original.nonce, chain: networkManager.buildViemChain(network), to, value, data, gas };
-    if (bumped.type === 'eip1559') {
-      txArgs.maxFeePerGas = bumped.maxFeePerGas;
-      txArgs.maxPriorityFeePerGas = bumped.maxPriorityFeePerGas;
-    } else {
-      txArgs.gasPrice = bumped.gasPrice;
+    const fees = resolveReplacementFees(bumped, gas, feeOverride);
+    const effectiveData = (txDataOverride as `0x${string}` | null) ?? data;
+    const txArgs: any = {
+      nonce: original.nonce,
+      chain: networkManager.buildViemChain(network),
+      to,
+      value,
+      data: effectiveData,
+      gas: fees.gas,
+    };
+    if (fees.type === 'eip1559') {
+      if (fees.maxFeePerGas !== null) txArgs.maxFeePerGas = fees.maxFeePerGas;
+      if (fees.maxPriorityFeePerGas !== null) txArgs.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
+    } else if (fees.gasPrice !== null) {
+      txArgs.gasPrice = fees.gasPrice;
     }
     const client = createWalletClient({ account, transport: http(network.rpcUrl, { timeout: 20_000, retryCount: 1 }) });
     hash = await withTimeout(client.sendTransaction(txArgs), 25_000, 'Broadcasting the replacement');
+    logGas = fees.gas;
+    logMaxFee = fees.maxFeePerGas;
+    logPriority = fees.maxPriorityFeePerGas;
+    logGasPrice = fees.gasPrice;
   }
   console.log(`[Auto-Wallet] replacePendingTx: broadcast ok`, { hash });
 
