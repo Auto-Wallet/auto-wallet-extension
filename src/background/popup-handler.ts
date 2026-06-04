@@ -9,16 +9,17 @@ import { getMulticall3Address } from '../lib/multicall';
 import { getItem, setItem, STORAGE_KEYS } from '../lib/storage';
 import {
   formatEther, formatUnits, parseEther, parseUnits, encodeFunctionData, erc20Abi, hexToBigInt,
-  serializeTransaction, type TransactionSerializable,
+  serializeTransaction, createWalletClient, http, parseTransaction, type TransactionSerializable,
 } from 'viem';
+import { requestUserConfirmation } from './confirm-manager';
 import { genId } from '../types/messages';
 import type { WhitelistRule } from '../types/whitelist';
 import type { Network } from '../types/network';
 import { type WalletSettings, DEFAULT_SETTINGS } from '../types/settings';
 import { emitAccountsChanged, emitChainChanged } from './events';
 import { toHex } from 'viem';
-import { applyGasPolicy, clampEstimatedFees } from '../lib/gas';
-import { notifyTx } from '../lib/notify';
+import { applyGasPolicy, clampEstimatedFees, computeReplacementFees, resolveReplacementFees } from '../lib/gas';
+import { pollTxReceipt } from './tx-poller';
 import { retryWithNextNonce } from '../lib/nonce';
 import { openLedgerPickerWindow } from './ledger-picker-manager';
 
@@ -148,11 +149,13 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         fee.txArgs.gas,
         { from: account.address, to: payload.to, value },
       );
+      let usedNonce: number | undefined = undefined;
       const hash = await retryWithNextNonce(async (nonceOverride) => {
         const nonce = nonceOverride ?? await publicClient.getTransactionCount({
           address: account.address,
           blockTag: 'pending',
         });
+        usedNonce = nonce;
         return client.sendTransaction({
           to: payload.to as `0x${string}`,
           value,
@@ -174,6 +177,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         origin: 'Auto Wallet',
         autoSigned: false,
         status: 'pending',
+        nonce: usedNonce,
         ...fee.logFields,
         gasLimit: finalGas.toString(),
       });
@@ -201,11 +205,13 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         fee.txArgs.gas,
         { from: account.address, to: payload.tokenAddress, data, value: 0n },
       );
+      let usedNonce: number | undefined = undefined;
       const hash = await retryWithNextNonce(async (nonceOverride) => {
         const nonce = nonceOverride ?? await publicClient.getTransactionCount({
           address: account.address,
           blockTag: 'pending',
         });
+        usedNonce = nonce;
         return client.sendTransaction({
           to: payload.tokenAddress as `0x${string}`,
           data,
@@ -229,6 +235,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         origin: 'Auto Wallet',
         autoSigned: false,
         status: 'pending',
+        nonce: usedNonce,
         ...fee.logFields,
         gasLimit: finalGas.toString(),
       });
@@ -315,6 +322,10 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
       return txLogger.getLog();
     case 'clearTxLog':
       return txLogger.clearLog();
+    case 'speedUpTx':
+      return replacePendingTx(payload.logId, 'speedup');
+    case 'cancelTx':
+      return replacePendingTx(payload.logId, 'cancel');
 
     // --- Swap (XFlows) ---
     case 'getStarredSwapChains': {
@@ -638,6 +649,271 @@ async function getFeeSuggestions(req: FeeSuggestionsRequest): Promise<FeeSuggest
   };
 }
 
+// --- Speed up / cancel a pending transaction ---
+
+/**
+ * Read the network's current fee suggestion for an arbitrary chain. Mirrors the
+ * EIP-1559-vs-legacy detection in getFeeSuggestions but is parameterized by
+ * client so it works for the pending tx's chain (not just the active one).
+ */
+async function getChainFeeData(client: Awaited<ReturnType<typeof getClient>>): Promise<{
+  maxFeePerGas: bigint | null;
+  maxPriorityFeePerGas: bigint | null;
+  gasPrice: bigint | null;
+}> {
+  try {
+    const block = await client.getBlock({ blockTag: 'latest' });
+    if (block.baseFeePerGas !== undefined && block.baseFeePerGas !== null) {
+      const fees = await client.estimateFeesPerGas();
+      if (fees.maxFeePerGas !== undefined && fees.maxPriorityFeePerGas !== undefined) {
+        const clamped = clampEstimatedFees({
+          maxFeePerGas: fees.maxFeePerGas,
+          maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+        });
+        return { maxFeePerGas: clamped.maxFeePerGas, maxPriorityFeePerGas: clamped.maxPriorityFeePerGas, gasPrice: null };
+      }
+    }
+  } catch {
+    // fall through to legacy gas price
+  }
+  try {
+    return { maxFeePerGas: null, maxPriorityFeePerGas: null, gasPrice: await client.getGasPrice() };
+  } catch {
+    return { maxFeePerGas: null, maxPriorityFeePerGas: null, gasPrice: null };
+  }
+}
+
+/**
+ * Re-broadcast a pending transaction at the same nonce with higher gas.
+ *  - 'speedup' keeps the original to/value/data so the same action just lands
+ *    faster.
+ *  - 'cancel' sends a 0-value self-transfer, which voids the stuck tx once it
+ *    mines (only one tx per nonce can confirm).
+ *
+ * The original tx is pulled live from the node so we have its exact nonce,
+ * calldata, and the fees we must beat; if it already mined we refuse. The
+ * existing history entry is updated in place (new hash + fees) and receipt
+ * polling restarts on the replacement.
+ *
+ * This never auto-broadcasts: the confirm popup always opens so the user sets
+ * the replacement's gas price by hand. The +30% bump over the original is only
+ * the prefill/floor shown in the popup's fee editor.
+ */
+/** Reject a slow network read so the UI gets a clear error instead of hanging. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s — check the network's RPC`)), ms),
+    ),
+  ]);
+}
+
+async function replacePendingTx(logId: string, kind: 'speedup' | 'cancel'): Promise<{ hash: string }> {
+  console.log(`[Auto-Wallet] replacePendingTx start`, { logId, kind });
+  await assertActiveCanSign();
+
+  const entry = (await txLogger.getLog()).find((e) => e.id === logId);
+  if (!entry) throw new Error('Transaction not found in history');
+  if (entry.status !== 'pending') throw new Error('Only pending transactions can be sped up or cancelled');
+  if (!entry.hash) throw new Error('Transaction has not been broadcast yet');
+
+  // Both account types go through the confirm popup below; Ledger additionally
+  // signs on-device there. Use the active account's *address* for the ownership
+  // check so we don't call getAccount() (which throws) on the Ledger path.
+  const info = await keyManager.getActiveAccountInfo();
+  if (info.address.toLowerCase() !== entry.from.toLowerCase()) {
+    throw new Error(
+      `This transaction was sent from ${entry.from.slice(0, 8)}…, but the active account is ${info.address.slice(0, 8)}… — switch to the sending account first`,
+    );
+  }
+  if (info.type === 'ledger' && !info.derivationPath) {
+    throw new Error('Ledger account is missing its derivation path');
+  }
+
+  const network = (await networkManager.getAllNetworks()).find((n) => n.chainId === entry.chainId);
+  if (!network) throw new Error(`Network ${entry.chainId} is not configured`);
+  const publicClient = await getClient(entry.chainId);
+
+  console.log(`[Auto-Wallet] replacePendingTx: fetching original tx ${entry.hash} on chain ${entry.chainId}`);
+  let original;
+  try {
+    original = await withTimeout(
+      publicClient.getTransaction({ hash: entry.hash as `0x${string}` }),
+      15_000,
+      'Fetching the original transaction',
+    );
+  } catch (err: any) {
+    if (err?.message?.includes('timed out')) throw err;
+    throw new Error('Original transaction not found on the node — it may have already dropped from the mempool');
+  }
+  console.log(`[Auto-Wallet] replacePendingTx: got original`, {
+    nonce: original.nonce,
+    blockNumber: original.blockNumber,
+    maxFeePerGas: original.maxFeePerGas?.toString(),
+    gasPrice: original.gasPrice?.toString(),
+  });
+  if (original.blockNumber !== null) {
+    throw new Error('Transaction already confirmed — it can no longer be sped up or cancelled');
+  }
+  if (kind === 'speedup' && !original.to) {
+    throw new Error('Cannot speed up a contract-creation transaction');
+  }
+
+  const networkFees = await getChainFeeData(publicClient);
+  const bumped = computeReplacementFees(
+    {
+      maxFeePerGas: original.maxFeePerGas ?? null,
+      maxPriorityFeePerGas: original.maxPriorityFeePerGas ?? null,
+      gasPrice: original.gasPrice ?? null,
+    },
+    networkFees,
+  );
+
+  // Replacement payload, shared by both signing paths.
+  const to = (kind === 'speedup' ? original.to! : info.address) as `0x${string}`;
+  const value = kind === 'speedup' ? original.value : 0n;
+  const data = kind === 'speedup' && original.input && original.input !== '0x'
+    ? (original.input as `0x${string}`)
+    : undefined;
+  const gas = kind === 'speedup' ? original.gas : 21_000n; // 21000 = bare no-data transfer
+
+  // Speed up / cancel never auto-broadcast: open the confirm popup so the user
+  // sets the final gas price by hand. The bumped (+30%) fees are passed only as
+  // an editable prefill/floor suggestion — the node still enforces the >10%
+  // replacement rule when the user's chosen value is broadcast.
+  const toHexOrUndef = (v: bigint | undefined) => (v !== undefined ? toHex(v) : undefined);
+  const displayTx: Record<string, string | undefined> = {
+    from: info.address,
+    to,
+    value: toHex(value),
+    data,
+    gas: toHex(gas),
+    nonce: toHex(original.nonce),
+    maxFeePerGas: toHexOrUndef(bumped.maxFeePerGas),
+    maxPriorityFeePerGas: toHexOrUndef(bumped.maxPriorityFeePerGas),
+    gasPrice: toHexOrUndef(bumped.gasPrice),
+  };
+
+  // Ledger signs on-device inside the popup (WebHID is unavailable here) and
+  // returns the signed raw bytes; software keys sign in the background after the
+  // popup hands back the user's confirmed fee override.
+  const ledgerCtx = info.type === 'ledger'
+    ? {
+        derivationPath: info.derivationPath!,
+        txJson: {
+          type: bumped.type,
+          to,
+          value: value.toString(),
+          data,
+          gas: gas.toString(),
+          nonce: original.nonce,
+          chainId: entry.chainId,
+          maxFeePerGas: bumped.maxFeePerGas?.toString(),
+          maxPriorityFeePerGas: bumped.maxPriorityFeePerGas?.toString(),
+          gasPrice: bumped.gasPrice?.toString(),
+        },
+      }
+    : undefined;
+
+  console.log(`[Auto-Wallet] replacePendingTx: prompting user to confirm (${info.type})`, {
+    nonce: original.nonce, to, type: bumped.type,
+    maxFeePerGas: bumped.maxFeePerGas?.toString(),
+    maxPriorityFeePerGas: bumped.maxPriorityFeePerGas?.toString(),
+    gasPrice: bumped.gasPrice?.toString(),
+  });
+
+  const { approved, signedRawTx, feeOverride, txDataOverride } = await requestUserConfirmation({
+    id: genId(),
+    method: 'eth_sendTransaction',
+    origin: `${entry.origin} · ${kind === 'cancel' ? 'Cancel' : 'Speed Up'}`,
+    params: [displayTx],
+    signerAddress: info.address,
+    chainId: entry.chainId,
+    chainName: network.name,
+    nativeSymbol: network.symbol,
+    ledger: ledgerCtx,
+  });
+  if (!approved) throw new Error(`${kind === 'cancel' ? 'Cancel' : 'Speed up'} was rejected`);
+
+  let hash: `0x${string}`;
+  // Actual fees recorded in the log — the values the user confirmed (software),
+  // or the real signed values read back from the raw tx (Ledger).
+  let logGas = gas;
+  let logMaxFee = bumped.maxFeePerGas ?? null;
+  let logPriority = bumped.maxPriorityFeePerGas ?? null;
+  let logGasPrice = bumped.gasPrice ?? null;
+
+  if (info.type === 'ledger') {
+    if (!signedRawTx) throw new Error('Ledger did not return a signed transaction');
+    hash = await withTimeout(
+      publicClient.sendRawTransaction({ serializedTransaction: signedRawTx }),
+      25_000,
+      'Broadcasting the replacement',
+    );
+    // The popup may have edited fees before signing — read the truth back out.
+    try {
+      const signed = parseTransaction(signedRawTx);
+      logGas = signed.gas ?? gas;
+      logMaxFee = signed.maxFeePerGas ?? null;
+      logPriority = signed.maxPriorityFeePerGas ?? null;
+      logGasPrice = signed.gasPrice ?? null;
+    } catch {
+      // keep the prepared values if the raw tx can't be parsed
+    }
+  } else {
+    // Software signing: use the fees the user confirmed in the popup, falling
+    // back to the bumped floor for any field they left blank.
+    const account = await keyManager.getAccount();
+    const fees = resolveReplacementFees(bumped, gas, feeOverride);
+    const effectiveData = (txDataOverride as `0x${string}` | null) ?? data;
+    const txArgs: any = {
+      nonce: original.nonce,
+      chain: networkManager.buildViemChain(network),
+      to,
+      value,
+      data: effectiveData,
+      gas: fees.gas,
+    };
+    if (fees.type === 'eip1559') {
+      if (fees.maxFeePerGas !== null) txArgs.maxFeePerGas = fees.maxFeePerGas;
+      if (fees.maxPriorityFeePerGas !== null) txArgs.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
+    } else if (fees.gasPrice !== null) {
+      txArgs.gasPrice = fees.gasPrice;
+    }
+    const client = createWalletClient({ account, transport: http(network.rpcUrl, { timeout: 20_000, retryCount: 1 }) });
+    hash = await withTimeout(client.sendTransaction(txArgs), 25_000, 'Broadcasting the replacement');
+    logGas = fees.gas;
+    logMaxFee = fees.maxFeePerGas;
+    logPriority = fees.maxPriorityFeePerGas;
+    logGasPrice = fees.gasPrice;
+  }
+  console.log(`[Auto-Wallet] replacePendingTx: broadcast ok`, { hash });
+
+  // Update the same row in place so History shows one entry that's now faster
+  // (or being cancelled). Keep the original to/value/method so the user still
+  // sees what the tx was doing; `prevHash` retains the superseded hash for
+  // cross-referencing, while `hash` becomes the new (trackable) replacement.
+  await txLogger.updateLogEntry(logId, {
+    hash,
+    prevHash: entry.hash,
+    nonce: original.nonce,
+    // A cancel always wins the label; a speed-up after a cancel keeps 'cancel'.
+    replacementKind: kind === 'cancel' ? 'cancel' : (entry.replacementKind ?? 'speedup'),
+    gasLimit: logGas.toString(),
+    maxFeePerGas: logMaxFee?.toString(),
+    maxPriorityFeePerGas: logPriority?.toString(),
+    gasPrice: logGasPrice?.toString(),
+    // Clear stale actuals from the prior (now-replaced) hash.
+    gasUsed: undefined,
+    effectiveGasPrice: undefined,
+    feeWei: undefined,
+  });
+
+  pollTxReceipt(logId, entry.chainId, hash, entry.origin, entry.autoSigned, network.blockExplorerUrl);
+  return { hash };
+}
+
 // --- Ledger send-tx preparation & raw broadcast ---
 
 interface LedgerPrepArgs {
@@ -850,46 +1126,3 @@ async function resolveGas(
   }));
 }
 
-// --- Tx receipt polling (shared with rpc-handler, but kept simple as a local helper) ---
-
-function pollTxReceipt(
-  logId: string,
-  chainId: number,
-  hash: string,
-  origin: string,
-  autoSigned: boolean,
-  explorerUrl?: string,
-): void {
-  const MAX_ATTEMPTS = 60;
-  const INTERVAL_MS = 5000;
-  let attempts = 0;
-
-  const timer = setInterval(async () => {
-    attempts++;
-    try {
-      const client = await networkManager.getClient(chainId);
-      const receipt = await client.getTransactionReceipt({ hash: hash as `0x${string}` });
-      if (receipt) {
-        const status = receipt.status === 'success' ? 'confirmed' : 'failed';
-        const gasUsed = receipt.gasUsed;
-        const effectiveGasPrice = receipt.effectiveGasPrice;
-        const fee = gasUsed !== undefined && effectiveGasPrice !== undefined
-          ? gasUsed * effectiveGasPrice
-          : null;
-        await txLogger.updateLogEntry(logId, {
-          status,
-          gasUsed: gasUsed?.toString(),
-          effectiveGasPrice: effectiveGasPrice?.toString(),
-          feeWei: fee?.toString(),
-        });
-        notifyTx(hash, origin, autoSigned, status, explorerUrl);
-        clearInterval(timer);
-      }
-    } catch {
-      // Receipt not available yet — keep polling
-    }
-    if (attempts >= MAX_ATTEMPTS) {
-      clearInterval(timer);
-    }
-  }, INTERVAL_MS);
-}

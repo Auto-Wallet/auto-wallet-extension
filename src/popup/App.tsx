@@ -5,16 +5,16 @@ import { UnlockPage } from './pages/UnlockPage';
 import { SetupPage } from './pages/SetupPage';
 import { WhitelistPage } from './pages/WhitelistPage';
 import { NetworkPage } from './pages/NetworkPage';
-import { TxLogPage } from './pages/TxLogPage';
+import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AccountMenu } from './pages/AccountMenu';
 import { AccountBadge } from './AccountBadge';
 import type { AccountSource, AccountType } from '../lib/key-manager.core';
 import {
-  SettingsIcon, ChevronDownIcon, WalletIcon, ShieldCheckIcon, LinkIcon, ScrollIcon,
+  SettingsIcon, ChevronDownIcon, WalletIcon, ShieldCheckIcon, LinkIcon, HistoryIcon,
 } from './icons';
 
-type Page = 'loading' | 'setup' | 'unlock' | 'account' | 'whitelist' | 'networks' | 'txlog' | 'settings';
+type Page = 'loading' | 'setup' | 'unlock' | 'account' | 'whitelist' | 'networks' | 'history' | 'settings';
 
 interface AccountInfo {
   id: string;
@@ -28,8 +28,8 @@ interface AccountInfo {
 const NAV_ITEMS: { page: Page; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
   { page: 'account',     label: 'Wallet', Icon: WalletIcon },
   { page: 'whitelist',   label: 'Rules',  Icon: ShieldCheckIcon },
-  { page: 'networks',    label: 'Chains', Icon: LinkIcon },
-  { page: 'txlog',       label: 'Log',    Icon: ScrollIcon },
+  { page: 'networks',    label: 'Chains',  Icon: LinkIcon },
+  { page: 'history',     label: 'History', Icon: HistoryIcon },
 ];
 
 export default function App() {
@@ -148,7 +148,7 @@ export default function App() {
         )}
         {page === 'whitelist' && <WhitelistPage />}
         {page === 'networks' && <NetworkPage />}
-        {page === 'txlog' && <TxLogPage />}
+        {page === 'history' && <HistoryPage />}
         {page === 'settings' && <SettingsPage />}
       </main>
     </div>

@@ -13,6 +13,12 @@ export interface TxLogEntry {
   autoSigned: boolean; // true = matched whitelist
   ruleId?: string;     // which whitelist rule matched
   status: 'pending' | 'confirmed' | 'failed';
+  nonce?: number;      // tx nonce — needed to build speed-up / cancel replacements
+  // Set once a higher-gas replacement was broadcast for this entry. `hash` then
+  // points at the replacement; `prevHash` keeps the superseded hash so the user
+  // can still cross-reference the original on an explorer.
+  replacementKind?: 'speedup' | 'cancel';
+  prevHash?: string;
 
   // Fee values requested at broadcast time (decimal strings)
   gasLimit?: string;             // gas units

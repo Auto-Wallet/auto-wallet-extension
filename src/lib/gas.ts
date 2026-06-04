@@ -47,3 +47,127 @@ export function clampEstimatedFees(fees: {
     maxFeePerGas: fees.maxFeePerGas + delta,
   };
 }
+
+// --- Replacement (speed-up / cancel) fee policy ---
+//
+// To replace a stuck transaction, the wallet broadcasts a new one at the SAME
+// nonce with strictly higher fees. Geth-family nodes reject a replacement
+// unless every fee field is at least ~10% above the original (the configurable
+// `txpool.pricebump`, default 10). We bump by 30% to clear that threshold with
+// comfortable margin and to give the replacement real priority in the mempool.
+export const REPLACEMENT_BUMP_NUM = 13n;
+export const REPLACEMENT_BUMP_DEN = 10n;
+
+/** Bump a fee by +30%, rounding up so even tiny values clear the >10% rule. */
+export function bumpFee(original: bigint): bigint {
+  return (original * REPLACEMENT_BUMP_NUM + REPLACEMENT_BUMP_DEN - 1n) / REPLACEMENT_BUMP_DEN;
+}
+
+export interface ReplacementFees {
+  type: 'eip1559' | 'legacy';
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  gasPrice?: bigint;
+}
+
+interface FeeFields {
+  maxFeePerGas?: bigint | null;
+  maxPriorityFeePerGas?: bigint | null;
+  gasPrice?: bigint | null;
+}
+
+/**
+ * Derive the fees for a replacement transaction from the original tx's fees,
+ * optionally raised further by the network's current suggestion.
+ *
+ * Each field is `max(original × 1.3, networkSuggestion)`:
+ *  - The ×1.3 floor guarantees the replacement always beats the original by
+ *    >10%, so the node accepts it.
+ *  - Taking the network suggestion when it's higher means a replacement still
+ *    mines even if the base fee spiked after the original was sent (otherwise a
+ *    +30% bump over a now-cheap original could still sit below the current base
+ *    fee).
+ *
+ * The original's type (EIP-1559 vs legacy) is preserved. An EIP-1559
+ * replacement's priority is also floored at MIN_PRIORITY_FEE_WEI, and maxFee is
+ * never allowed to drop below the priority fee.
+ */
+export function computeReplacementFees(original: FeeFields, network?: FeeFields): ReplacementFees {
+  const raise = (floor: bigint, suggestion: bigint | null | undefined): bigint =>
+    suggestion != null && suggestion > floor ? suggestion : floor;
+
+  if (original.maxFeePerGas != null) {
+    const priority = floorPriorityFee(
+      raise(bumpFee(original.maxPriorityFeePerGas ?? 0n), network?.maxPriorityFeePerGas),
+    );
+    let maxFeePerGas = raise(bumpFee(original.maxFeePerGas), network?.maxFeePerGas);
+    if (maxFeePerGas < priority) maxFeePerGas = priority;
+    return { type: 'eip1559', maxFeePerGas, maxPriorityFeePerGas: priority };
+  }
+
+  const gasPrice = raise(bumpFee(original.gasPrice ?? 0n), network?.gasPrice);
+  return { type: 'legacy', gasPrice };
+}
+
+/** Fee values edited by the user in the confirm popup (decimal-wei strings). */
+export interface ReplacementFeeOverride {
+  type: 'eip1559' | 'legacy';
+  gas: string | null;
+  maxFeePerGas: string | null;
+  maxPriorityFeePerGas: string | null;
+  gasPrice: string | null;
+}
+
+export interface ResolvedReplacementFees {
+  type: 'eip1559' | 'legacy';
+  gas: bigint;
+  maxFeePerGas: bigint | null;
+  maxPriorityFeePerGas: bigint | null;
+  gasPrice: bigint | null;
+}
+
+/**
+ * Merge the user's confirm-popup fee edits over the auto-computed replacement
+ * floor. Speed-up / cancel no longer auto-broadcast: the popup shows the bumped
+ * floor as an editable prefill, and whatever the user confirms flows back here.
+ *
+ * Every field prefers the user's value and falls back to the bumped floor, so an
+ * untouched field still clears the node's >10% replacement rule. `override` is
+ * null only when the popup's fee suggestions failed to load — then the bumped
+ * floor is used verbatim, exactly as the old auto path did.
+ */
+export function resolveReplacementFees(
+  bumped: ReplacementFees,
+  defaultGas: bigint,
+  override: ReplacementFeeOverride | null | undefined,
+): ResolvedReplacementFees {
+  const parse = (s: string | null | undefined): bigint | null => {
+    if (s === null || s === undefined || s === '') return null;
+    try {
+      return BigInt(s);
+    } catch {
+      return null;
+    }
+  };
+
+  const type = override?.type ?? bumped.type;
+  const gas = parse(override?.gas) ?? defaultGas;
+
+  if (type === 'eip1559') {
+    return {
+      type,
+      gas,
+      maxFeePerGas: parse(override?.maxFeePerGas) ?? bumped.maxFeePerGas ?? null,
+      maxPriorityFeePerGas: parse(override?.maxPriorityFeePerGas) ?? bumped.maxPriorityFeePerGas ?? null,
+      gasPrice: null,
+    };
+  }
+
+  return {
+    type,
+    gas,
+    maxFeePerGas: null,
+    maxPriorityFeePerGas: null,
+    gasPrice: parse(override?.gasPrice) ?? bumped.gasPrice ?? null,
+  };
+}
