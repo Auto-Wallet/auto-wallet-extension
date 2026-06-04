@@ -20,7 +20,8 @@ import {
   type LedgerConfirmContext,
 } from './confirm-manager';
 import { requestUnlock } from './unlock-manager';
-import { notifyTx, notifySign } from '../lib/notify';
+import { notifySign } from '../lib/notify';
+import { pollTxReceipt } from './tx-poller';
 import { emitChainChanged } from './events';
 import { RpcError, userRejection } from '../lib/rpc-error';
 import { validateSigner, validateRpcUrl, parseAddChainParams, parseTxParams } from '../lib/rpc-validation';
@@ -621,46 +622,3 @@ async function forwardToNode(method: string, params: unknown[]): Promise<unknown
   return json.result;
 }
 
-// --- Tx receipt polling ---
-
-function pollTxReceipt(
-  logId: string,
-  chainId: number,
-  hash: string,
-  origin: string,
-  autoSigned: boolean,
-  explorerUrl?: string,
-): void {
-  const MAX_ATTEMPTS = 60;
-  const INTERVAL_MS = 5000;
-  let attempts = 0;
-
-  const timer = setInterval(async () => {
-    attempts++;
-    try {
-      const client = await networkManager.getClient(chainId);
-      const receipt = await client.getTransactionReceipt({ hash: hash as `0x${string}` });
-      if (receipt) {
-        const status = receipt.status === 'success' ? 'confirmed' : 'failed';
-        const gasUsed = receipt.gasUsed;
-        const effectiveGasPrice = receipt.effectiveGasPrice;
-        const fee = gasUsed !== undefined && effectiveGasPrice !== undefined
-          ? gasUsed * effectiveGasPrice
-          : null;
-        await txLogger.updateLogEntry(logId, {
-          status,
-          gasUsed: gasUsed?.toString(),
-          effectiveGasPrice: effectiveGasPrice?.toString(),
-          feeWei: fee?.toString(),
-        });
-        notifyTx(hash, origin, autoSigned, status, explorerUrl);
-        clearInterval(timer);
-      }
-    } catch {
-      // Receipt not available yet — keep polling
-    }
-    if (attempts >= MAX_ATTEMPTS) {
-      clearInterval(timer);
-    }
-  }, INTERVAL_MS);
-}

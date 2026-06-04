@@ -57,11 +57,13 @@ function statusLabel(entry: TxLogEntry): string {
 export function HistoryPage() {
   const [log, setLog] = useState<TxLogEntry[]>([]);
   const [networks, setNetworks] = useState<Network[]>([]);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  // Busy + feedback are keyed by tx id so acting on one row never clobbers
+  // another's in-flight state or message.
+  const [busyMap, setBusyMap] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   // Per-row feedback shown directly under the buttons that triggered it, so the
   // result is visible without scrolling to a top-of-page banner.
-  const [rowMsg, setRowMsg] = useState<{ id: string; kind: 'ok' | 'err'; text: string } | null>(null);
+  const [rowMsgs, setRowMsgs] = useState<Record<string, { kind: 'ok' | 'err'; text: string }>>({});
 
   useEffect(() => {
     loadLog();
@@ -93,21 +95,25 @@ export function HistoryPage() {
   async function manageTx(entry: TxLogEntry, kind: 'speedup' | 'cancel') {
     const action = kind === 'speedup' ? 'speedUpTx' : 'cancelTx';
     console.log(`[Auto-Wallet] ${action} click`, { logId: entry.id, hash: entry.hash, chainId: entry.chainId });
-    setBusyId(entry.id);
+    setBusyMap((prev) => ({ ...prev, [entry.id]: true }));
     setError(null);
-    setRowMsg(null);
+    setRowMsgs((prev) => {
+      const next = { ...prev };
+      delete next[entry.id];
+      return next;
+    });
     try {
       const res = await callBackground<{ hash: string }>(action, { logId: entry.id });
       console.log(`[Auto-Wallet] ${action} ok`, res);
-      setRowMsg({ id: entry.id, kind: 'ok', text: `Replacement sent: ${res.hash.slice(0, 14)}…` });
+      setRowMsgs((prev) => ({ ...prev, [entry.id]: { kind: 'ok', text: `Replacement sent: ${res.hash.slice(0, 14)}…` } }));
       await loadLog();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`[Auto-Wallet] ${action} failed:`, msg);
       setError(msg);
-      setRowMsg({ id: entry.id, kind: 'err', text: msg });
+      setRowMsgs((prev) => ({ ...prev, [entry.id]: { kind: 'err', text: msg } }));
     } finally {
-      setBusyId(null);
+      setBusyMap((prev) => ({ ...prev, [entry.id]: false }));
     }
   }
 
@@ -135,6 +141,8 @@ export function HistoryPage() {
         const explorerUrl = entry.hash ? getExplorerUrl(entry.chainId, entry.hash) : null;
         const symbol = getSymbol(entry.chainId);
         const requestedPrice = entry.maxFeePerGas ?? entry.gasPrice;
+        const busy = !!busyMap[entry.id];
+        const rowMsg = rowMsgs[entry.id];
         // Show actions on every pending row; the background validates whether
         // this account can actually replace it and returns a clear error if not.
         const manageable = entry.status === 'pending';
@@ -200,15 +208,15 @@ export function HistoryPage() {
               <div className="row tx-actions">
                 <button
                   onClick={() => manageTx(entry, 'speedup')}
-                  disabled={busyId === entry.id}
+                  disabled={busy}
                   className="btn-ghost accent tx-action-btn"
                   title="Re-send at the same nonce — you set the gas price in the confirm popup"
                 >
-                  <ZapIcon size={12} /> {busyId === entry.id ? 'Working…' : 'Speed Up'}
+                  <ZapIcon size={12} /> {busy ? 'Working…' : 'Speed Up'}
                 </button>
                 <button
                   onClick={() => manageTx(entry, 'cancel')}
-                  disabled={busyId === entry.id}
+                  disabled={busy}
                   className="btn-ghost danger tx-action-btn"
                   title="Replace with a 0-value self-transfer — you set the gas price in the confirm popup"
                 >
@@ -216,12 +224,12 @@ export function HistoryPage() {
                 </button>
               </div>
             )}
-            {busyId === entry.id && (
+            {busy && (
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
                 Set the gas price and confirm in the popup window…
               </div>
             )}
-            {rowMsg?.id === entry.id && busyId !== entry.id && (
+            {rowMsg && !busy && (
               rowMsg.kind === 'ok' && entry.hash ? (
                 <div style={{ fontSize: 10, marginTop: 6, color: 'var(--success)' }}>
                   ✓ Replacement sent — track: <HashLink hash={entry.hash} url={explorerUrl} />

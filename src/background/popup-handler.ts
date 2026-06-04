@@ -19,7 +19,7 @@ import { type WalletSettings, DEFAULT_SETTINGS } from '../types/settings';
 import { emitAccountsChanged, emitChainChanged } from './events';
 import { toHex } from 'viem';
 import { applyGasPolicy, clampEstimatedFees, computeReplacementFees, resolveReplacementFees } from '../lib/gas';
-import { notifyTx } from '../lib/notify';
+import { pollTxReceipt } from './tx-poller';
 import { retryWithNextNonce } from '../lib/nonce';
 import { openLedgerPickerWindow } from './ledger-picker-manager';
 
@@ -149,7 +149,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         fee.txArgs.gas,
         { from: account.address, to: payload.to, value },
       );
-      let usedNonce = 0;
+      let usedNonce: number | undefined = undefined;
       const hash = await retryWithNextNonce(async (nonceOverride) => {
         const nonce = nonceOverride ?? await publicClient.getTransactionCount({
           address: account.address,
@@ -205,7 +205,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         fee.txArgs.gas,
         { from: account.address, to: payload.tokenAddress, data, value: 0n },
       );
-      let usedNonce = 0;
+      let usedNonce: number | undefined = undefined;
       const hash = await retryWithNextNonce(async (nonceOverride) => {
         const nonce = nonceOverride ?? await publicClient.getTransactionCount({
           address: account.address,
@@ -1126,46 +1126,3 @@ async function resolveGas(
   }));
 }
 
-// --- Tx receipt polling (shared with rpc-handler, but kept simple as a local helper) ---
-
-function pollTxReceipt(
-  logId: string,
-  chainId: number,
-  hash: string,
-  origin: string,
-  autoSigned: boolean,
-  explorerUrl?: string,
-): void {
-  const MAX_ATTEMPTS = 60;
-  const INTERVAL_MS = 5000;
-  let attempts = 0;
-
-  const timer = setInterval(async () => {
-    attempts++;
-    try {
-      const client = await networkManager.getClient(chainId);
-      const receipt = await client.getTransactionReceipt({ hash: hash as `0x${string}` });
-      if (receipt) {
-        const status = receipt.status === 'success' ? 'confirmed' : 'failed';
-        const gasUsed = receipt.gasUsed;
-        const effectiveGasPrice = receipt.effectiveGasPrice;
-        const fee = gasUsed !== undefined && effectiveGasPrice !== undefined
-          ? gasUsed * effectiveGasPrice
-          : null;
-        await txLogger.updateLogEntry(logId, {
-          status,
-          gasUsed: gasUsed?.toString(),
-          effectiveGasPrice: effectiveGasPrice?.toString(),
-          feeWei: fee?.toString(),
-        });
-        notifyTx(hash, origin, autoSigned, status, explorerUrl);
-        clearInterval(timer);
-      }
-    } catch {
-      // Receipt not available yet — keep polling
-    }
-    if (attempts >= MAX_ATTEMPTS) {
-      clearInterval(timer);
-    }
-  }, INTERVAL_MS);
-}
