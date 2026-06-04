@@ -74,12 +74,20 @@ export function HistoryPage() {
   }, []);
 
   async function loadLog() {
-    const [entries, nets] = await Promise.all([
-      callBackground<TxLogEntry[]>('getTxLog'),
-      callBackground<Network[]>('getNetworks'),
-    ]);
-    setLog(entries);
-    setNetworks(nets);
+    // Runs on mount and every 5s. callBackground can reject if the service
+    // worker is asleep or the extension context was invalidated — swallow it
+    // (with a log) so the interval doesn't raise an unhandled rejection, and
+    // keep the last-known list on screen rather than blanking it.
+    try {
+      const [entries, nets] = await Promise.all([
+        callBackground<TxLogEntry[]>('getTxLog'),
+        callBackground<Network[]>('getNetworks'),
+      ]);
+      setLog(entries);
+      setNetworks(nets);
+    } catch (err) {
+      console.error('[Auto-Wallet] Failed to refresh transaction history:', err);
+    }
   }
 
   function getExplorerUrl(chainId: number, hash: string): string | null {
