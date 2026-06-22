@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Auto Wallet",
-  "version": "0.15.4",
+  "version": "0.16.0",
   "description": "Minimal auto-signing wallet for EVM chains",
   "permissions": ["storage", "windows", "notifications"],
   "host_permissions": [
     "https://balance-change-simulate-api.wanscan.org/*",
     "https://api.coingecko.com/*",
     "https://xflows.wanchain.org/*",
-    "https://api.relay.link/*"
+    "https://api.relay.link/*",
+    "https://web3.okx.com/*"
   ],
   "background": {
     "service_worker": "background.js",
