@@ -481,6 +481,23 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
       return handleRpcMethod('eth_sendTransaction', [tx], origin, sender);
     }
 
+    /**
+     * Block until a transaction is mined, returning its receipt status. Used by
+     * the Swap pages to gate the next step (e.g. enabling Swap only after the
+     * ERC20 approve has actually landed on-chain, not merely been broadcast).
+     */
+    case 'waitForReceipt': {
+      const chainId = Number(payload.chainId);
+      const hash = payload.hash as `0x${string}`;
+      const client = await getClient(chainId);
+      const receipt = await client.waitForTransactionReceipt({
+        hash,
+        timeout: 180_000,
+        pollingInterval: 2_000,
+      });
+      return { status: receipt.status, blockNumber: receipt.blockNumber.toString() };
+    }
+
     // --- Settings ---
     case 'getSettings': {
       const s = await getItem<WalletSettings>(STORAGE_KEYS.SETTINGS);

@@ -58,6 +58,9 @@
   --shadow-md:   0 4px 12px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04);
   --shadow-glow: 0 0 0 3px var(--accent-ring);
 
+  /* Subtle outline for logo images — pure black in light mode */
+  --img-outline: rgba(0,0,0,.1);
+
   color-scheme: light;
 }
 
@@ -103,6 +106,9 @@
 
     --overlay-bg: rgba(8, 10, 16, .8);
 
+    /* Pure white outline for logo images in dark mode */
+    --img-outline: rgba(255,255,255,.1);
+
     color-scheme: dark;
   }
 }
@@ -142,6 +148,9 @@
   --shadow-xs:   0 1px 2px rgba(0,0,0,.3);
   --shadow-sm:   0 1px 3px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.25);
   --shadow-md:   0 6px 16px rgba(0,0,0,.5), 0 1px 3px rgba(0,0,0,.3);
+
+  /* Pure white outline for logo images in dark mode */
+  --img-outline: rgba(255,255,255,.1);
 
   color-scheme: dark;
 }
@@ -250,7 +259,7 @@ body {
   border-radius: var(--radius-md);
   padding: 14px;
   box-shadow: var(--shadow-sm);
-  transition: all .12s ease;
+  transition: border-color .12s ease, background .12s ease, box-shadow .12s ease;
 }
 .card:hover { border-color: var(--border-default); }
 .card.card-active {
@@ -276,6 +285,7 @@ body {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  text-wrap: balance;
 }
 .section-label {
   font-size: 10px;
@@ -288,7 +298,7 @@ body {
   display: inline-flex;
   color: var(--accent);
 }
-.mono { font-family: var(--font-mono); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* --- Buttons --- */
@@ -303,11 +313,11 @@ body {
   padding: 10px 16px;
   cursor: pointer;
   width: 100%;
-  transition: all .12s ease;
+  transition: background .12s ease, box-shadow .12s ease, transform .12s ease;
   box-shadow: 0 1px 3px rgba(79,70,229,.3);
 }
 .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 2px 8px rgba(79,70,229,.35); }
-.btn-primary:active { transform: scale(.98); }
+.btn-primary:active { transform: scale(.96); }
 .btn-primary:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 
 .btn-secondary {
@@ -321,10 +331,11 @@ body {
   padding: 9px 16px;
   cursor: pointer;
   width: 100%;
-  transition: all .12s ease;
+  transition: border-color .12s ease, color .12s ease, background .12s ease, transform .12s ease;
   box-shadow: var(--shadow-xs);
 }
 .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+.btn-secondary:active { transform: scale(.96); }
 
 .btn-ghost {
   font-family: var(--font-sans);
@@ -336,9 +347,10 @@ body {
   padding: 4px 8px;
   border-radius: 6px;
   cursor: pointer;
-  transition: all .1s ease;
+  transition: color .1s ease, background .1s ease, transform .1s ease;
 }
 .btn-ghost:hover { color: var(--text-secondary); background: var(--accent-subtle); }
+.btn-ghost:active { transform: scale(.96); }
 .btn-ghost.accent { color: var(--accent); }
 .btn-ghost.accent:hover { color: var(--accent-hover); background: var(--accent-subtle); }
 .btn-ghost.danger { color: var(--danger); }
@@ -355,7 +367,7 @@ body {
   padding: 9px 12px;
   outline: none;
   width: 100%;
-  transition: all .12s ease;
+  transition: border-color .12s ease, box-shadow .12s ease, background .12s ease;
 }
 .input-field:focus {
   border-color: var(--accent);
@@ -588,6 +600,7 @@ input[type="checkbox"]:checked::after {
   letter-spacing: -.03em;
   color: var(--text-primary);
   line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 .hero-balance .balance-symbol {
   font-size: 11px;
@@ -603,6 +616,7 @@ input[type="checkbox"]:checked::after {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 .hero-balance .balance-fiat.placeholder { color: var(--text-muted); opacity: .55; }
 
@@ -628,7 +642,7 @@ input[type="checkbox"]:checked::after {
   border-radius: var(--radius-md);
   padding: 11px 16px;
   cursor: pointer;
-  transition: all .12s ease;
+  transition: border-color .12s ease, color .12s ease, background .12s ease, box-shadow .12s ease, transform .12s ease;
   box-shadow: var(--shadow-xs);
 }
 .action-btn:hover {
@@ -637,7 +651,7 @@ input[type="checkbox"]:checked::after {
   background: var(--accent-subtle);
   box-shadow: var(--shadow-sm);
 }
-.action-btn:active { transform: scale(.98); }
+.action-btn:active { transform: scale(.96); }
 .action-btn:disabled { opacity: .6; cursor: wait; }
 .action-btn-icon {
   display: inline-flex;
@@ -738,7 +752,7 @@ input[type="checkbox"]:checked::after {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-xs);
-  transition: all .12s ease;
+  transition: border-color .12s ease, background .12s ease;
 }
 .token-card:hover {
   border-color: var(--border-default);
@@ -759,11 +773,13 @@ input[type="checkbox"]:checked::after {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 .token-card-fiat {
   font-size: 10px;
   color: var(--text-muted);
   margin-top: 1px;
+  font-variant-numeric: tabular-nums;
 }
 .token-card-right {
   display: flex;
@@ -878,6 +894,7 @@ input[type="checkbox"]:checked::after {
   flex-shrink: 0;
   object-fit: cover;
   background: var(--bg-input);
+  box-shadow: 0 0 0 1px var(--img-outline);
 }
 .token-icon-fallback {
   display: flex;
@@ -910,11 +927,13 @@ input[type="checkbox"]:checked::after {
   font-weight: 700;
   color: var(--text-primary);
   margin-bottom: 4px;
+  text-wrap: balance;
 }
 .center-page .subtitle {
   font-size: 13px;
   color: var(--text-muted);
   margin-bottom: 28px;
+  text-wrap: pretty;
 }
 
 /* --- Danger --- */
@@ -929,9 +948,10 @@ input[type="checkbox"]:checked::after {
   border-radius: var(--radius-sm);
   padding: 7px 14px;
   cursor: pointer;
-  transition: all .1s ease;
+  transition: background .1s ease, border-color .1s ease, transform .1s ease;
 }
 .btn-danger:hover { background: rgba(220,38,38,.1); border-color: rgba(220,38,38,.25); }
+.btn-danger:active { transform: scale(.96); }
 
 /* --- Detail text --- */
 .rule-detail {
@@ -1064,6 +1084,7 @@ body:has(.confirm-shell) {
   font-size: 12px;
   color: var(--text-secondary);
   display: block;
+  font-variant-numeric: tabular-nums;
 }
 .confirm-chain {
   display: flex;
@@ -1159,6 +1180,7 @@ body:has(.confirm-shell) {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .confirm-row {
@@ -1279,6 +1301,7 @@ body:has(.confirm-shell) {
   flex-shrink: 0;
   font-size: 13px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .simulation-delta.in { color: var(--success); }
 .simulation-delta.out { color: var(--danger); }
@@ -1298,6 +1321,7 @@ body:has(.confirm-shell) {
   font-size: 11px;
   line-height: 1.5;
   color: var(--warning);
+  text-wrap: pretty;
 }
 
 .confirm-footer {
@@ -1438,6 +1462,7 @@ body:has(.confirm-shell) {
   font-size: 11px;
   line-height: 1.55;
   color: var(--text-secondary);
+  text-wrap: pretty;
 }
 .danger-modal-text strong { color: var(--text-primary); font-weight: 600; }
 .danger-modal-check {
@@ -2149,6 +2174,7 @@ body:has(.confirm-shell) {
   border: 1px solid rgba(220,38,38,.12);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
+  text-wrap: pretty;
 }
 
 .export-key-box {
@@ -2191,7 +2217,7 @@ body:has(.confirm-shell) {
   padding: 9px 32px 9px 30px;
   outline: none;
   width: 100%;
-  transition: all .12s ease;
+  transition: border-color .12s ease, box-shadow .12s ease;
   box-shadow: var(--shadow-xs);
 }
 .search-input:focus {
@@ -2520,6 +2546,7 @@ body:has(.swap-shell) {
 .swap-token-logo {
   border-radius: 50%;
   background: white;
+  box-shadow: 0 0 0 1px var(--img-outline);
 }
 .swap-token-fallback {
   width: 20px;
@@ -2542,6 +2569,7 @@ body:has(.swap-shell) {
   font-weight: 600;
   color: var(--text-primary);
   padding: 4px 0;
+  font-variant-numeric: tabular-nums;
 }
 .swap-amount-input::placeholder { color: var(--text-muted); }
 
@@ -2552,6 +2580,7 @@ body:has(.swap-shell) {
   color: var(--text-primary);
   padding: 4px 0;
   min-height: 40px;
+  font-variant-numeric: tabular-nums;
 }
 .swap-amount-placeholder {
   color: var(--text-muted);
@@ -2621,6 +2650,7 @@ body:has(.swap-shell) {
 .swap-summary-value {
   font-weight: 600;
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 .swap-summary-value.is-warn { color: var(--warning); }
 .swap-summary-error {
@@ -2913,6 +2943,7 @@ body:has(.swap-shell) {
   font-weight: 700;
   color: var(--text-primary);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .swap-quote-symbol {
   font-size: 11px;
@@ -3163,6 +3194,7 @@ body:has(.swap-shell) {
   border-radius: 50%;
   background: white;
 }
+.tp-chain-logo { box-shadow: 0 0 0 1px var(--img-outline); }
 .tp-chain-fallback {
   display: inline-flex;
   align-items: center;
@@ -3229,6 +3261,7 @@ body:has(.swap-shell) {
 .tp-token-logo {
   border-radius: 50%;
   background: white;
+  box-shadow: 0 0 0 1px var(--img-outline);
 }
 .tp-token-fallback {
   display: inline-flex;
@@ -3275,6 +3308,7 @@ body:has(.swap-shell) {
   font-weight: 600;
   color: var(--text-primary);
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 .tp-token-balance-sub {
   font-size: 10px;
@@ -3335,4 +3369,119 @@ body:has(.swap-shell) {
 }
 .card.network-card-active:hover {
   background: var(--accent-subtle);
+}
+
+/* --- Hero actions: 4-up single row (Send / Receive / Bridge / Swap) ---
+   The icon stacks above a small label so all four fit in the 360px popup. */
+.hero-actions-4 {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.hero-actions-4 .action-btn {
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+/* ============================================================
+   OKX DEX single-chain Swap (swap-okx.html)
+   Reuses the .swap-* layout from the bridge page; the rules below
+   add the network selector and the single-chain token picker.
+   ============================================================ */
+.okx-chain-select {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.okx-chain-dropdown { position: relative; }
+.okx-chain-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.okx-chain-trigger:hover { border-color: var(--accent); background: var(--accent-subtle); }
+.okx-chain-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+}
+.okx-chain-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+}
+.okx-chain-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  transition: background .1s ease;
+}
+.okx-chain-option:hover { background: var(--bg-card-hover); }
+.okx-chain-option.is-active { background: var(--accent-subtle); color: var(--accent); }
+.okx-chain-option-id { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* Token picker modal (single-chain) — overlay reused from .receive-modal-overlay */
+.okx-picker-panel {
+  width: 100%;
+  max-width: 420px;
+  max-height: min(560px, 88vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 60px rgba(15, 23, 42, .25);
+  overflow: hidden;
+}
+.okx-picker-search { padding: 0 14px 10px; }
+.okx-picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 12px;
+  display: flex;
+  flex-direction: column;
+}
+.tp-token-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
 }

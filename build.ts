@@ -40,6 +40,15 @@ async function buildEntry(entry: string, outputName: string) {
           ?? Bun.env.BCS_API_URL
           ?? 'https://balance-change-simulate-api.wanscan.org',
       ),
+      // SECURITY: OKX DEX requires HMAC-signed requests, so the API key/secret/
+      // passphrase are baked into the bundle here (read from the gitignored
+      // .env, never committed). This mirrors the desktop app, which compiles the
+      // same credentials into its binary. A published web extension exposes them
+      // to anyone who unpacks the build — for a public release, move signing
+      // behind a backend proxy instead of shipping the secret.
+      __OKX_API_KEY__: JSON.stringify(localEnv.OKX_API_KEY ?? Bun.env.OKX_API_KEY ?? ''),
+      __OKX_SECRET_KEY__: JSON.stringify(localEnv.OKX_SECRET_KEY ?? Bun.env.OKX_SECRET_KEY ?? ''),
+      __OKX_PASSPHRASE__: JSON.stringify(localEnv.OKX_PASSPHRASE ?? Bun.env.OKX_PASSPHRASE ?? ''),
     },
   });
   if (!result.success) {
@@ -68,6 +77,7 @@ await Promise.all([
   buildEntry('src/unlock/index.tsx', 'unlock-page.js'),
   buildEntry('src/ledger-picker/index.tsx', 'ledger-picker.js'),
   buildEntry('src/swap/index.tsx', 'swap.js'),
+  buildEntry('src/swap-okx/index.tsx', 'swap-okx.js'),
 ]);
 
 // Unlock HTML (dApp-triggered unlock popup)
@@ -127,6 +137,21 @@ writeFileSync(join(DIST, 'swap.html'), `<!DOCTYPE html>
 <body>
   <div id="root"></div>
   <script src="swap.js"></script>
+</body>
+</html>`);
+
+// OKX Swap HTML (full-tab single-chain OKX DEX swap UI)
+writeFileSync(join(DIST, 'swap-okx.html'), `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Swap - Auto Wallet</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script src="swap-okx.js"></script>
 </body>
 </html>`);
 
