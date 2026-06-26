@@ -26,6 +26,9 @@ export type OkxChain = {
   chainId?: string;
   chainName: string;
   dexTokenApproveAddress?: string;
+  chainLogoUrl?: string;
+  iconUrl?: string;
+  logoUrl?: string;
 };
 
 export type OkxToken = {

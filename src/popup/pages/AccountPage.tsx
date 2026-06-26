@@ -513,18 +513,18 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
             Receive
           </button>
           <button
-            onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('swap.html') })}
-            className="action-btn"
-          >
-            <span className="action-btn-icon"><LinkIcon size={16} /></span>
-            Bridge
-          </button>
-          <button
             onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('swap-okx.html') })}
             className="action-btn"
           >
             <span className="action-btn-icon"><SwapIcon size={16} /></span>
             Swap
+          </button>
+          <button
+            onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('swap.html') })}
+            className="action-btn"
+          >
+            <span className="action-btn-icon"><LinkIcon size={16} /></span>
+            Bridge
           </button>
         </div>
       )}
