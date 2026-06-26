@@ -26,6 +26,7 @@ import {
   type OkxToken,
 } from '../lib/okxDex';
 import type { Network } from '../types/network';
+import { compactAmount, minReceived } from './format';
 import { encodeFunctionData, erc20Abi, formatUnits, parseUnits, toHex } from 'viem';
 
 interface ActiveInfo {
@@ -65,21 +66,6 @@ function nativeOkxToken(net: Network): OkxToken {
   };
 }
 
-function trimAmount(value: string): string {
-  if (!value.includes('.')) return value;
-  return value.replace(/\.?0+$/, '');
-}
-
-function compactAmount(value: string, maxDecimals = 6): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value;
-  if (n === 0) return '0';
-  if (Math.abs(n) >= 1) {
-    return n.toLocaleString('en-US', { maximumFractionDigits: Math.min(maxDecimals, 4) });
-  }
-  return n.toFixed(maxDecimals).replace(/\.?0+$/, '');
-}
-
 function shortAddr(a: string): string {
   return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
 }
@@ -109,17 +95,6 @@ function quoteKey(
     to.tokenContractAddress.toLowerCase(),
     amountRaw.toString(),
   ].join(':');
-}
-
-function minReceived(amountOut: string, decimals: number, slippagePct: number | null): string {
-  if (slippagePct === null) return '';
-  try {
-    const raw = BigInt(amountOut);
-    const min = raw * BigInt(Math.max(0, Math.floor((100 - slippagePct) * 10_000))) / 1_000_000n;
-    return trimAmount(formatUnits(min, decimals));
-  } catch {
-    return '';
-  }
 }
 
 const CHAIN_MARKS: Record<number, { label: string; bg: string; fg: string }> = {
@@ -916,6 +891,11 @@ function Header({ active, network }: { active: ActiveInfo | null; network: Netwo
 
 function ChainIcon({ network, size = 30, logoUrl = '' }: { network: Network; size?: number; logoUrl?: string }) {
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [logoUrl]);
+
   if (logoUrl && !failed) {
     return (
       <img
