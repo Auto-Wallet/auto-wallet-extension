@@ -2262,6 +2262,27 @@ body:has(.confirm-shell) {
   flex-shrink: 0;
   opacity: .8;
 }
+.okx-tx-link {
+  width: 100%;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.5;
+}
+.okx-tx-label {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-weight: 700;
+}
+.okx-tx-hash {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.okx-tx-link svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
 
 /* --- History: per-tx SpeedUp / Revoke actions --- */
 .tx-actions {
@@ -3391,31 +3412,139 @@ body:has(.swap-shell) {
    Reuses the .swap-* layout from the bridge page; the rules below
    add the network selector and the single-chain token picker.
    ============================================================ */
+.swap-shell:has(.okx-top-panel) {
+  background:
+    radial-gradient(circle at 50% -180px, rgba(79,70,229,.14), transparent 420px),
+    var(--bg-root);
+}
+.swap-shell:has(.okx-top-panel) .swap-main {
+  max-width: 520px;
+  gap: 14px;
+  padding-top: 28px;
+}
+.swap-shell:has(.okx-top-panel) .swap-card {
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, .08), var(--shadow-xs);
+}
+.swap-shell:has(.okx-top-panel) .swap-side {
+  min-height: 112px;
+  padding: 18px;
+  gap: 14px;
+}
+.swap-shell:has(.okx-top-panel) .swap-side-row {
+  min-height: 46px;
+  align-items: center;
+}
+.swap-shell:has(.okx-top-panel) .swap-amount-input,
+.swap-shell:has(.okx-top-panel) .swap-amount-readonly {
+  min-height: 46px;
+  padding: 0;
+  line-height: 1;
+}
+.swap-shell:has(.okx-top-panel) .swap-amount-readonly {
+  display: flex;
+  align-items: center;
+}
+.swap-shell:has(.okx-top-panel) .swap-token-pill {
+  min-height: 42px;
+}
+.okx-header-mark {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+.okx-top-panel {
+  width: 100%;
+}
 .okx-chain-select {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 .okx-chain-dropdown { position: relative; }
 .okx-chain-trigger {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 10px 14px;
+  min-height: 64px;
+  padding: 10px 12px;
   font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-xs);
+  background:
+    linear-gradient(135deg, var(--bg-card), var(--bg-input));
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
-  transition: border-color .12s ease, background .12s ease;
+  transition: border-color .12s ease, background .12s ease, box-shadow .12s ease, transform .12s ease;
 }
-.okx-chain-trigger:hover { border-color: var(--accent); background: var(--accent-subtle); }
+.okx-chain-trigger:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm), var(--shadow-glow);
+  transform: translateY(-1px);
+}
+.okx-chain-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  font-weight: 800;
+  letter-spacing: 0;
+  box-shadow: 0 0 0 1px var(--img-outline), inset 0 1px 0 rgba(255,255,255,.45);
+}
+.okx-chain-icon-img {
+  object-fit: cover;
+  background: var(--bg-card);
+}
+.okx-chain-trigger-copy,
+.okx-chain-option-copy {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+.okx-chain-trigger-name,
+.okx-chain-option-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.okx-chain-trigger-name {
+  font-size: 14px;
+  font-weight: 800;
+}
+.okx-chain-trigger-meta,
+.okx-chain-option-id {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.okx-chain-trigger-caret {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
 .okx-chain-backdrop {
   position: fixed;
   inset: 0;
@@ -3438,8 +3567,7 @@ body:has(.swap-shell) {
 .okx-chain-option {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   padding: 9px 10px;
   background: none;
@@ -3455,7 +3583,92 @@ body:has(.swap-shell) {
 }
 .okx-chain-option:hover { background: var(--bg-card-hover); }
 .okx-chain-option.is-active { background: var(--accent-subtle); color: var(--accent); }
-.okx-chain-option-id { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.okx-chain-option.is-active .okx-chain-option-name { color: var(--accent); }
+.okx-chain-option-id { font-variant-numeric: tabular-nums; }
+.okx-chain-option-symbol {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+}
+.swap-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 18px;
+  min-width: 0;
+}
+.okx-balance-line,
+.okx-route-line {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.okx-balance-line {
+  flex: 1;
+}
+.okx-balance-line span,
+.okx-route-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.okx-balance-line .swap-max-btn {
+  flex-shrink: 0;
+}
+.okx-route-line .swap-status-spinner {
+  width: 11px;
+  height: 11px;
+  border-width: 1.5px;
+}
+.okx-summary {
+  gap: 10px;
+}
+.okx-summary .swap-summary-row {
+  gap: 12px;
+}
+.okx-summary .swap-summary-value {
+  max-width: 260px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.okx-refresh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border-subtle);
+}
+.okx-refresh-btn {
+  height: 28px;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 8px;
+}
+.okx-refresh-btn:disabled {
+  opacity: .45;
+  cursor: default;
+}
+.okx-refresh-meta {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Token picker modal (single-chain) — overlay reused from .receive-modal-overlay */
 .okx-picker-panel {
@@ -3484,4 +3697,39 @@ body:has(.swap-shell) {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 180px;
+}
+
+@media (max-width: 620px) {
+  .swap-shell:has(.okx-top-panel) .swap-main {
+    padding: 18px 14px 64px;
+  }
+  .okx-top-panel {
+    width: 100%;
+  }
+  .okx-top-copy h1 {
+    font-size: 28px;
+  }
+  .swap-side-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .okx-balance-line,
+  .okx-route-line {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .okx-refresh-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .okx-summary .swap-summary-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .okx-summary .swap-summary-value {
+    max-width: 100%;
+    text-align: left;
+  }
 }

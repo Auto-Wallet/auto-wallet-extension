@@ -5,7 +5,10 @@ import {
   ChevronDownIcon,
   CloseIcon,
   ExternalLinkIcon,
+  RefreshIcon,
   SearchIcon,
+  SwapIcon,
+  WalletIcon,
 } from '../popup/icons';
 import {
   okxApproveTransaction,
@@ -44,6 +47,7 @@ type Stage =
 
 const SLIPPAGE_OPTIONS = ['0.5', '1', '3'];
 const QUOTE_DEBOUNCE_MS = 700;
+const QUOTE_CACHE_TTL_MS = 15_000;
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 /** OKX uses 0xeee… for native; the wallet's balance lookup expects 0x0…0. */
@@ -66,6 +70,16 @@ function trimAmount(value: string): string {
   return value.replace(/\.?0+$/, '');
 }
 
+function compactAmount(value: string, maxDecimals = 6): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return value;
+  if (n === 0) return '0';
+  if (Math.abs(n) >= 1) {
+    return n.toLocaleString('en-US', { maximumFractionDigits: Math.min(maxDecimals, 4) });
+  }
+  return n.toFixed(maxDecimals).replace(/\.?0+$/, '');
+}
+
 function shortAddr(a: string): string {
   return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
 }
@@ -83,6 +97,85 @@ function routeLabel(quote: OkxQuote | null): string {
   return `${list.slice(0, 2).join(' + ')} +${list.length - 2}`;
 }
 
+function quoteKey(
+  net: Network,
+  from: OkxToken,
+  to: OkxToken,
+  amountRaw: bigint,
+): string {
+  return [
+    net.chainId,
+    from.tokenContractAddress.toLowerCase(),
+    to.tokenContractAddress.toLowerCase(),
+    amountRaw.toString(),
+  ].join(':');
+}
+
+function minReceived(amountOut: string, decimals: number, slippagePct: number | null): string {
+  if (slippagePct === null) return '';
+  try {
+    const raw = BigInt(amountOut);
+    const min = raw * BigInt(Math.max(0, Math.floor((100 - slippagePct) * 10_000))) / 1_000_000n;
+    return trimAmount(formatUnits(min, decimals));
+  } catch {
+    return '';
+  }
+}
+
+const CHAIN_MARKS: Record<number, { label: string; bg: string; fg: string }> = {
+  1: { label: 'Ξ', bg: '#eef2ff', fg: '#4f46e5' },
+  10: { label: 'OP', bg: '#fff1f2', fg: '#dc2626' },
+  25: { label: 'CRO', bg: '#eef2ff', fg: '#1d4ed8' },
+  56: { label: 'BNB', bg: '#fef3c7', fg: '#a16207' },
+  100: { label: 'GNO', bg: '#dcfce7', fg: '#047857' },
+  137: { label: 'POL', bg: '#f3e8ff', fg: '#7e22ce' },
+  250: { label: 'FTM', bg: '#e0f2fe', fg: '#0369a1' },
+  324: { label: 'ZK', bg: '#ede9fe', fg: '#6d28d9' },
+  888: { label: 'WAN', bg: '#e0f2fe', fg: '#0369a1' },
+  999: { label: 'WAN', bg: '#e0f2fe', fg: '#0369a1' },
+  1101: { label: 'zkE', bg: '#f3e8ff', fg: '#7e22ce' },
+  1284: { label: 'GLM', bg: '#ede9fe', fg: '#5b21b6' },
+  1285: { label: 'MOV', bg: '#ede9fe', fg: '#5b21b6' },
+  5000: { label: 'MNT', bg: '#ecfeff', fg: '#0e7490' },
+  8453: { label: 'BASE', bg: '#dbeafe', fg: '#1d4ed8' },
+  17000: { label: 'Ξ', bg: '#eef2ff', fg: '#4f46e5' },
+  34443: { label: 'MODE', bg: '#fef9c3', fg: '#854d0e' },
+  42161: { label: 'ARB', bg: '#e0f2fe', fg: '#0369a1' },
+  42170: { label: 'ARB', bg: '#e0f2fe', fg: '#0369a1' },
+  42220: { label: 'CELO', bg: '#dcfce7', fg: '#15803d' },
+  43114: { label: 'AVAX', bg: '#fee2e2', fg: '#b91c1c' },
+  534352: { label: 'SCR', bg: '#fef3c7', fg: '#92400e' },
+  59144: { label: 'LIN', bg: '#f5f5f4', fg: '#292524' },
+  81457: { label: 'BL', bg: '#fef9c3', fg: '#713f12' },
+  11155111: { label: 'SEP', bg: '#eef2ff', fg: '#4f46e5' },
+  11155420: { label: 'OP', bg: '#fff1f2', fg: '#dc2626' },
+  421614: { label: 'ARB', bg: '#e0f2fe', fg: '#0369a1' },
+  84532: { label: 'BASE', bg: '#dbeafe', fg: '#1d4ed8' },
+  43113: { label: 'AVAX', bg: '#fee2e2', fg: '#b91c1c' },
+  80002: { label: 'POL', bg: '#f3e8ff', fg: '#7e22ce' },
+  97: { label: 'BNB', bg: '#fef3c7', fg: '#a16207' },
+};
+
+function chainMark(net: Network): { label: string; bg: string; fg: string } {
+  const known = CHAIN_MARKS[net.chainId];
+  if (known) return known;
+  const label = net.symbol.length <= 4 ? net.symbol : net.name.slice(0, 3);
+  const hue = [...net.name].reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 360;
+  return {
+    label: label.toUpperCase(),
+    bg: `hsl(${hue}, 65%, 92%)`,
+    fg: `hsl(${hue}, 55%, 34%)`,
+  };
+}
+
+function okxChainLogo(meta: OkxChain | undefined): string {
+  return meta?.chainLogoUrl || meta?.iconUrl || meta?.logoUrl || '';
+}
+
+function nativeTokenLogo(tokens: OkxToken[]): string {
+  return tokens.find((t) => okxIsNative(t.tokenContractAddress))?.tokenLogoUrl || '';
+}
+
 export function OkxSwapPage() {
   const [active, setActive] = useState<ActiveInfo | null>(null);
   const [unlocked, setUnlocked] = useState<boolean | null>(null);
@@ -90,6 +183,8 @@ export function OkxSwapPage() {
   const [okxChainMeta, setOkxChainMeta] = useState<Map<string, OkxChain>>(new Map());
   // Cache of resolved approve spenders (dexTokenApproveAddress) per chainId.
   const spenderByChainRef = useRef<Map<number, string>>(new Map());
+  const tokenCacheRef = useRef<Map<number, OkxToken[]>>(new Map());
+  const quoteCacheRef = useRef<Map<string, { quote: OkxQuote; at: number }>>(new Map());
 
   const [chainId, setChainId] = useState<number | null>(null);
   const [showChainMenu, setShowChainMenu] = useState(false);
@@ -105,11 +200,13 @@ export function OkxSwapPage() {
 
   const [balanceRaw, setBalanceRaw] = useState<bigint | null>(null);
   const [balance, setBalance] = useState('');
+  const [balanceLoading, setBalanceLoading] = useState(false);
   const [allowance, setAllowance] = useState<bigint | null>(null);
 
   const [quote, setQuote] = useState<OkxQuote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteRefreshNonce, setQuoteRefreshNonce] = useState(0);
 
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   const [status, setStatus] = useState<OkxHistory | null>(null);
@@ -160,6 +257,11 @@ export function OkxSwapPage() {
       return '';
     }
   }, [quote, to, toDecimals]);
+
+  const minOut = useMemo(() => {
+    if (!quote) return '';
+    return minReceived(quote.toTokenAmount, toDecimals, slippagePct);
+  }, [quote, toDecimals, slippagePct]);
 
   // --- Initial load: account, unlock state, networks -----------------------
   useEffect(() => {
@@ -217,12 +319,19 @@ export function OkxSwapPage() {
     setStatus(null);
     (async () => {
       try {
+        const cached = tokenCacheRef.current.get(selectedNetwork.chainId);
+        if (cached) {
+          if (!cancelled) setTokens(cached);
+          return;
+        }
         const list = await okxTokens(String(selectedNetwork.chainId));
         if (cancelled) return;
         // OKX's all-tokens list doesn't always include the native coin; make
         // sure it's selectable (e.g. as the receive side of USDC→ETH).
         const hasNative = list.some((t) => okxIsNative(t.tokenContractAddress));
-        setTokens(hasNative ? list : [nativeOkxToken(selectedNetwork), ...list]);
+        const nextTokens = hasNative ? list : [nativeOkxToken(selectedNetwork), ...list];
+        tokenCacheRef.current.set(selectedNetwork.chainId, nextTokens);
+        setTokens(nextTokens);
       } catch {
         if (!cancelled) setTokens([]);
       } finally {
@@ -234,8 +343,14 @@ export function OkxSwapPage() {
 
   // --- Balance of the from-token -------------------------------------------
   useEffect(() => {
-    if (!from || !active || !selectedNetwork) { setBalance(''); setBalanceRaw(null); return; }
+    if (!from || !active || !selectedNetwork) {
+      setBalance('');
+      setBalanceRaw(null);
+      setBalanceLoading(false);
+      return;
+    }
     let cancelled = false;
+    setBalanceLoading(true);
     (async () => {
       try {
         const info = await callBackground<{ balance: string; balanceRaw: string; decimals: number }>(
@@ -251,6 +366,8 @@ export function OkxSwapPage() {
         setBalanceRaw(BigInt(info.balanceRaw));
       } catch {
         if (!cancelled) { setBalance(''); setBalanceRaw(null); }
+      } finally {
+        if (!cancelled) setBalanceLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -319,11 +436,19 @@ export function OkxSwapPage() {
     if (from.tokenContractAddress.toLowerCase() === to.tokenContractAddress.toLowerCase()) {
       setQuote(null);
       setQuoteError('Choose two different tokens.');
+      setQuoting(false);
       return;
     }
     const seq = ++quoteSeqRef.current;
-    setQuoting(true);
     setQuoteError(null);
+    const key = quoteKey(selectedNetwork, from, to, amountRaw);
+    const cached = quoteCacheRef.current.get(key);
+    if (cached && Date.now() - cached.at < QUOTE_CACHE_TTL_MS) {
+      setQuote(cached.quote);
+      setQuoting(false);
+      return;
+    }
+    setQuoting(true);
     const handle = setTimeout(async () => {
       try {
         const q = await okxQuote({
@@ -334,6 +459,11 @@ export function OkxSwapPage() {
           swapMode: 'exactIn',
         });
         if (seq !== quoteSeqRef.current) return;
+        quoteCacheRef.current.set(key, { quote: q, at: Date.now() });
+        if (quoteCacheRef.current.size > 30) {
+          const oldestKey = quoteCacheRef.current.keys().next().value;
+          if (oldestKey) quoteCacheRef.current.delete(oldestKey);
+        }
         setQuote(q);
       } catch (e: any) {
         if (seq !== quoteSeqRef.current) return;
@@ -344,11 +474,18 @@ export function OkxSwapPage() {
       }
     }, QUOTE_DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [from, to, selectedNetwork, amountRaw]);
+  }, [from, to, selectedNetwork, amountRaw, quoteRefreshNonce]);
 
   function setMax() {
     if (balanceRaw === null || !from) return;
     setAmount(trimAmount(formatUnits(balanceRaw, fromDecimals)));
+  }
+
+  function refreshQuote() {
+    if (!from || !to || !selectedNetwork || amountRaw === null) return;
+    quoteCacheRef.current.delete(quoteKey(selectedNetwork, from, to, amountRaw));
+    setQuote(null);
+    setQuoteRefreshNonce((n) => n + 1);
   }
 
   function flip() {
@@ -483,55 +620,92 @@ export function OkxSwapPage() {
           </div>
         ) : (
           <>
-            {/* Network selector */}
-            <div className="okx-chain-select">
-              <span className="swap-side-label">Network</span>
-              <div className="okx-chain-dropdown">
-                <button className="okx-chain-trigger" onClick={() => setShowChainMenu((v) => !v)}>
-                  <span>{selectedNetwork?.name ?? 'Select network'}</span>
-                  <ChevronDownIcon size={16} />
-                </button>
-                {showChainMenu && (
-                  <>
-                  <div className="okx-chain-backdrop" onClick={() => setShowChainMenu(false)} />
-                  <div className="okx-chain-menu">
-                    {chainOptions.map((n) => (
-                      <button
-                        key={n.chainId}
-                        className={`okx-chain-option${n.chainId === chainId ? ' is-active' : ''}`}
-                        onClick={() => { setChainId(n.chainId); setShowChainMenu(false); }}
-                      >
-                        <span>{n.name}</span>
-                        <span className="okx-chain-option-id mono">{n.chainId}</span>
-                      </button>
-                    ))}
-                  </div>
-                  </>
-                )}
+            <section className="okx-top-panel">
+              <div className="okx-chain-select">
+                <span className="swap-side-label">Network</span>
+                <div className="okx-chain-dropdown">
+                  <button className="okx-chain-trigger" onClick={() => setShowChainMenu((v) => !v)}>
+                    {selectedNetwork ? (
+                      <>
+                        <ChainIcon
+                          network={selectedNetwork}
+                          size={34}
+                          logoUrl={okxChainLogo(okxChainMeta.get(String(selectedNetwork.chainId))) || nativeTokenLogo(tokens)}
+                        />
+                        <span className="okx-chain-trigger-copy">
+                          <span className="okx-chain-trigger-name">{selectedNetwork.name}</span>
+                          <span className="okx-chain-trigger-meta">
+                            Chain {selectedNetwork.chainId} · {selectedNetwork.symbol}
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <span className="okx-chain-trigger-copy">
+                        <span className="okx-chain-trigger-name">Select network</span>
+                      </span>
+                    )}
+                    <span className="okx-chain-trigger-caret"><ChevronDownIcon size={16} /></span>
+                  </button>
+                  {showChainMenu && (
+                    <>
+                    <div className="okx-chain-backdrop" onClick={() => setShowChainMenu(false)} />
+                    <div className="okx-chain-menu">
+                      {chainOptions.map((n) => (
+                        <button
+                          key={n.chainId}
+                          className={`okx-chain-option${n.chainId === chainId ? ' is-active' : ''}`}
+                          onClick={() => { setChainId(n.chainId); setShowChainMenu(false); }}
+                        >
+                          <ChainIcon
+                            network={n}
+                            size={26}
+                            logoUrl={okxChainLogo(okxChainMeta.get(String(n.chainId)))}
+                          />
+                          <span className="okx-chain-option-copy">
+                            <span className="okx-chain-option-name">{n.name}</span>
+                            <span className="okx-chain-option-id mono">Chain {n.chainId}</span>
+                          </span>
+                          <span className="okx-chain-option-symbol">{n.symbol}</span>
+                        </button>
+                      ))}
+                    </div>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
+            </section>
 
-            {/* Swap card */}
             <div className="swap-card">
               <div className="swap-side">
-                <div className="swap-side-label">You pay</div>
+                <div className="swap-side-head">
+                  <div className="swap-side-label">You pay</div>
+                  <div className="okx-balance-line">
+                    <WalletIcon size={13} />
+                    <span>
+                      {balanceLoading
+                        ? 'Loading balance…'
+                        : `Balance: ${balance || '—'} ${from?.tokenSymbol ?? ''}`}
+                    </span>
+                    {balanceRaw !== null && balanceRaw > 0n && (
+                      <button className="swap-max-btn" onClick={setMax}>MAX</button>
+                    )}
+                  </div>
+                </div>
                 <div className="swap-side-row">
                   <input
                     className="swap-amount-input"
                     inputMode="decimal"
                     placeholder="0.0"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                    onChange={(e) => {
+                      const cleaned = e.target.value.replace(/[^0-9.]/g, '');
+                      const firstDot = cleaned.indexOf('.');
+                      setAmount(firstDot === -1
+                        ? cleaned
+                        : cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, ''));
+                    }}
                   />
                   <TokenPill token={from} onClick={() => setPicker('from')} />
-                </div>
-                <div className="swap-side-meta">
-                  <span className="swap-side-meta-muted">
-                    Balance: {balance || '—'} {from?.tokenSymbol ?? ''}
-                  </span>
-                  {balanceRaw !== null && balanceRaw > 0n && (
-                    <button className="swap-max-btn" onClick={setMax}>MAX</button>
-                  )}
                 </div>
               </div>
 
@@ -540,23 +714,28 @@ export function OkxSwapPage() {
               </button>
 
               <div className="swap-side">
-                <div className="swap-side-label">You receive</div>
+                <div className="swap-side-head">
+                  <div className="swap-side-label">You receive</div>
+                  <div className="okx-route-line">
+                    {quoting ? (
+                      <><span className="swap-status-spinner" /> Quoting…</>
+                    ) : quote ? (
+                      <>via {routeLabel(quote)}</>
+                    ) : (
+                      <span>—</span>
+                    )}
+                  </div>
+                </div>
                 <div className="swap-side-row">
                   <div className="swap-amount-readonly">
-                    {amountOut ? amountOut : <span className="swap-amount-placeholder">0.0</span>}
+                    {amountOut ? compactAmount(amountOut, 8) : <span className="swap-amount-placeholder">0.0</span>}
                   </div>
                   <TokenPill token={to} onClick={() => setPicker('to')} placeholder="Select" />
-                </div>
-                <div className="swap-side-meta">
-                  <span className="swap-side-meta-muted">
-                    {quoting ? 'Fetching best price…' : quote ? `via ${routeLabel(quote)}` : ' '}
-                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Slippage */}
-            <div className="swap-summary">
+            <div className="swap-summary okx-summary">
               <div className="swap-summary-row">
                 <span>Slippage tolerance</span>
                 <div className="swap-slippage">
@@ -572,12 +751,19 @@ export function OkxSwapPage() {
                   <input
                     className="input-field swap-slippage-input"
                     value={slippage}
+                    aria-label="Custom slippage percent"
                     onChange={(e) => setSlippage(e.target.value.replace(/[^0-9.]/g, ''))}
                   />
                 </div>
               </div>
               {quote && (
                 <>
+                  <div className="swap-summary-row">
+                    <span>Minimum received</span>
+                    <span className="swap-summary-value">
+                      {minOut ? compactAmount(minOut, 8) : '—'} {to?.tokenSymbol}
+                    </span>
+                  </div>
                   <div className="swap-summary-row">
                     <span>Rate</span>
                     <span className="swap-summary-value">
@@ -599,9 +785,28 @@ export function OkxSwapPage() {
                       <span className="swap-summary-value">${Number(quote.tradeFee).toFixed(2)}</span>
                     </div>
                   )}
+                  <div className="swap-summary-row">
+                    <span>Route</span>
+                    <span className="swap-summary-value">{routeLabel(quote)}</span>
+                  </div>
                 </>
               )}
+              {slippagePct === null && <div className="swap-summary-error">Slippage must be between 0.01% and 50%.</div>}
               {quoteError && <div className="swap-summary-error">{quoteError}</div>}
+              <div className="okx-refresh-row">
+                <button
+                  type="button"
+                  className="btn-ghost okx-refresh-btn"
+                  onClick={refreshQuote}
+                  disabled={!from || !to || !amountRaw || quoting}
+                >
+                  <RefreshIcon size={13} />
+                  Refresh quote
+                </button>
+                <span className="okx-refresh-meta">
+                  {quote ? 'Price shown for the current amount' : 'Enter an amount and token pair'}
+                </span>
+              </div>
             </div>
 
             {/* Actions */}
@@ -650,8 +855,9 @@ export function OkxSwapPage() {
                   )}
                 </div>
                 {explorerTxUrl && (
-                  <a className="tx-link" href={explorerTxUrl} target="_blank" rel="noreferrer">
-                    {shortAddr(stage.hash)}
+                  <a className="tx-link okx-tx-link" href={explorerTxUrl} target="_blank" rel="noreferrer">
+                    <span className="okx-tx-label">TxHash:</span>
+                    <span className="okx-tx-hash">{stage.hash}</span>
                     <ExternalLinkIcon size={12} />
                   </a>
                 )}
@@ -695,11 +901,47 @@ function Header({ active, network }: { active: ActiveInfo | null; network: Netwo
   return (
     <header className="swap-header">
       <div className="swap-header-left">
-        <span className="swap-header-title">Swap</span>
-        <span className="swap-header-sub">OKX DEX Aggregator{network ? ` · ${network.name}` : ''}</span>
+        <span className="okx-header-mark"><SwapIcon size={16} /></span>
+        <span className="swap-header-title">Auto Wallet</span>
+        <span className="swap-header-sub">OKX Swap{network ? ` · ${network.name}` : ''}</span>
       </div>
-      {active && <span className="swap-header-addr mono">{shortAddr(active.address)}</span>}
+      {active && (
+        <span className="swap-header-addr mono">
+          {active.label} · {shortAddr(active.address)}
+        </span>
+      )}
     </header>
+  );
+}
+
+function ChainIcon({ network, size = 30, logoUrl = '' }: { network: Network; size?: number; logoUrl?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (logoUrl && !failed) {
+    return (
+      <img
+        className="okx-chain-icon okx-chain-icon-img"
+        src={logoUrl}
+        width={size}
+        height={size}
+        alt=""
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  const mark = chainMark(network);
+  return (
+    <span
+      className="okx-chain-icon"
+      style={{
+        width: size,
+        height: size,
+        background: mark.bg,
+        color: mark.fg,
+        fontSize: Math.max(9, Math.floor(size * 0.28)),
+      }}
+    >
+      {mark.label}
+    </span>
   );
 }
 
