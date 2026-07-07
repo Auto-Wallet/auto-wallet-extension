@@ -9,6 +9,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AccountMenu } from './pages/AccountMenu';
 import { AccountBadge } from './AccountBadge';
+import { ErrorBoundary } from './ErrorBoundary';
 import type { AccountSource, AccountType } from '../lib/key-manager.core';
 import {
   SettingsIcon, ChevronDownIcon, WalletIcon, ShieldCheckIcon, LinkIcon, HistoryIcon,
@@ -138,6 +139,7 @@ export default function App() {
       )}
 
       <main className="app-main">
+        <ErrorBoundary>
         {page === 'loading' && <div className="loading-page"><div className="spinner" /></div>}
         {page === 'setup' && <SetupPage onDone={() => nav('account')} />}
         {page === 'unlock' && <UnlockPage onUnlock={() => nav('account')} />}
@@ -150,6 +152,7 @@ export default function App() {
         {page === 'networks' && <NetworkPage />}
         {page === 'history' && <HistoryPage />}
         {page === 'settings' && <SettingsPage />}
+        </ErrorBoundary>
       </main>
     </div>
   );
