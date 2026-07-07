@@ -469,9 +469,9 @@ input[type="checkbox"]:checked::after {
 
 /* --- Badges --- */
 .badge {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 10px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: .02em;
   padding: 3px 8px;
   border-radius: var(--radius-pill);
@@ -2284,7 +2284,142 @@ body:has(.confirm-shell) {
   margin-top: 2px;
 }
 
-/* --- History: per-tx SpeedUp / Revoke actions --- */
+/* --- History: tx cards --- */
+.tx-day-label { margin-top: 4px; }
+.stack > .tx-day-label:first-of-type { margin-top: 0; }
+
+.tx-card-head { margin-bottom: 10px; }
+
+.tx-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: capitalize;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+}
+.tx-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.tx-status-pending {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+/* opacity-only pulse: the shared `pulse` keyframes glow green, wrong for a warning-colored dot */
+.tx-status-pending .tx-status-dot { animation: pulse-opacity 1.5s ease-in-out infinite; }
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .4; }
+}
+.tx-status-success {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.tx-status-danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.tx-status-muted {
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.tx-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.tx-card-main { align-items: flex-start; }
+.tx-card-summary { min-width: 0; }
+.tx-amount {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.tx-to {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.tx-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color .1s ease, background .1s ease;
+}
+.tx-copy-btn:hover { color: var(--accent); background: var(--accent-subtle); }
+
+.tx-card-actions { gap: 2px; flex-shrink: 0; }
+
+.tx-explorer-btn:hover { color: var(--accent); background: var(--accent-subtle); }
+
+.tx-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color .1s ease, background .1s ease;
+}
+.tx-detail-toggle:hover { color: var(--text-secondary); background: var(--bg-card-hover); }
+.tx-detail-toggle svg { transition: transform .15s ease; }
+.tx-detail-toggle.open svg { transform: rotate(180deg); }
+
+.tx-card-meta {
+  margin-top: 8px;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tx-details {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.tx-row-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.tx-clear-prompt {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.empty-state-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: .8;
+}
+
+/* --- History: per-tx SpeedUp / Cancel actions --- */
 .tx-actions {
   gap: 8px;
   margin-top: 8px;
