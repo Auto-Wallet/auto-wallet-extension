@@ -139,7 +139,8 @@ export default function App() {
       )}
 
       <main className="app-main">
-        <ErrorBoundary>
+        {/* key={page}: a crash on one page must not keep blocking the others after navigation */}
+        <ErrorBoundary key={page}>
         {page === 'loading' && <div className="loading-page"><div className="spinner" /></div>}
         {page === 'setup' && <SetupPage onDone={() => nav('account')} />}
         {page === 'unlock' && <UnlockPage onUnlock={() => nav('account')} />}

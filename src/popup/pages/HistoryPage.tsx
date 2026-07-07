@@ -53,7 +53,7 @@ function dayLabel(ts: number): string {
 
 /** Compact per-row time: relative for today's entries, clock time otherwise. */
 function rowTime(ts: number): string {
-  const diff = Date.now() - ts;
+  const diff = Math.max(0, Date.now() - ts); // clamp: a future ts (clock skew) must not read "just now" forever
   if (new Date(ts).toDateString() === new Date().toDateString()) {
     if (diff < 60_000) return 'just now';
     if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
@@ -178,9 +178,14 @@ export function HistoryPage() {
   }
 
   async function copyAddress(id: string, addr: string) {
-    await navigator.clipboard.writeText(addr);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    try {
+      await navigator.clipboard.writeText(addr);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    } catch (err) {
+      // clipboard.writeText rejects when the popup loses focus mid-click
+      console.error('[Auto-Wallet] Failed to copy address:', err);
+    }
   }
 
   function toggleExpanded(id: string) {
