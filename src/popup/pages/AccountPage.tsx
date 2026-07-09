@@ -13,7 +13,7 @@ import type { AccountSource, AccountType } from '../../lib/key-manager.core';
 import { getPrices, nativePriceKey, tokenPriceKey } from '../../lib/price-manager';
 import {
   SendIcon, ReceiveIcon, RefreshIcon, CopyIcon, CheckIcon, ExternalLinkIcon, PlusIcon, CloseIcon,
-  SwapIcon, LinkIcon,
+  SwapIcon,
 } from '../icons';
 import { ReceiveModal } from '../ReceiveModal';
 
@@ -503,7 +503,7 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
           </div>
         </>
       ) : (
-        <div className="hero-actions hero-actions-4">
+        <div className="hero-actions hero-actions-3">
           <button onClick={openSendNative} className="action-btn">
             <span className="action-btn-icon"><SendIcon size={16} /></span>
             Send
@@ -513,18 +513,11 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
             Receive
           </button>
           <button
-            onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('swap-okx.html') })}
+            onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('swap.html') })}
             className="action-btn"
           >
             <span className="action-btn-icon"><SwapIcon size={16} /></span>
             Swap
-          </button>
-          <button
-            onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('swap.html') })}
-            className="action-btn"
-          >
-            <span className="action-btn-icon"><LinkIcon size={16} /></span>
-            Bridge
           </button>
         </div>
       )}
