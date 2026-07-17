@@ -57,7 +57,7 @@ export function ReceiveModal({ address, networkName, onClose }: Props) {
           <div className="receive-modal-qr">
             {qrSvg
               ? <div dangerouslySetInnerHTML={{ __html: qrSvg }} />
-              : <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Generating…</div>}
+              : <span className="receive-modal-generating">Generating…</span>}
           </div>
 
           {networkName && (
@@ -68,8 +68,8 @@ export function ReceiveModal({ address, networkName, onClose }: Props) {
         </div>
 
         <div className="receive-modal-footer">
-          <button onClick={copyAddress} className="btn-primary" style={{ flex: 1 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <button onClick={copyAddress} className="btn-primary">
+            <span className="btn-icon-text">
               {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
               {copied ? 'Copied' : 'Copy address'}
             </span>

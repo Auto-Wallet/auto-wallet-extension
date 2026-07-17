@@ -12,7 +12,7 @@ import { AccountBadge } from './AccountBadge';
 import { ErrorBoundary } from './ErrorBoundary';
 import type { AccountSource, AccountType } from '../lib/key-manager.core';
 import {
-  SettingsIcon, ChevronDownIcon, WalletIcon, ShieldCheckIcon, LinkIcon, HistoryIcon,
+  ChevronDownIcon, WalletIcon, ShieldCheckIcon, LinkIcon, HistoryIcon,
 } from './icons';
 
 type Page = 'loading' | 'setup' | 'unlock' | 'account' | 'whitelist' | 'networks' | 'history' | 'settings';
@@ -92,14 +92,13 @@ export default function App() {
     <div className="app-shell">
       {showChrome && (
         <header className="app-header-wrap">
-          {/* Row 1: Account selector */}
-          <div className="header-row-account">
-            <div ref={menuRef} style={{ position: 'relative' }}>
+          <div className="header-row">
+            <div ref={menuRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
               <button onClick={() => setShowAccountMenu(!showAccountMenu)} className="account-trigger">
                 <span className="account-trigger-dot" />
                 <span className="account-trigger-label">
                   {activeAccount && <AccountBadge source={activeAccount.source} />}
-                  {activeAccount?.label ?? 'Account'}
+                  <span className="account-trigger-name">{activeAccount?.label ?? 'Account'}</span>
                 </span>
                 <span className="account-trigger-addr">{shortAddr}</span>
                 <ChevronDownIcon size={10} className="account-trigger-chevron" />
@@ -108,33 +107,25 @@ export default function App() {
                 <AccountMenu
                   onSwitch={() => { setShowAccountMenu(false); refreshActiveAccount(); nav('account'); }}
                   onClose={() => setShowAccountMenu(false)}
+                  onSettings={() => { setShowAccountMenu(false); nav('settings'); }}
                 />
               )}
             </div>
-            <button
-              onClick={() => nav('settings')}
-              className={`settings-icon-btn ${page === 'settings' ? 'active' : ''}`}
-              title="Settings"
-              aria-label="Settings"
-            >
-              <SettingsIcon size={15} />
-            </button>
-          </div>
 
-          {/* Row 2: Navigation tabs */}
-          <nav className="header-row-nav">
-            {NAV_ITEMS.map(({ page: p, label, Icon }) => (
-              <button
-                key={p}
-                onClick={() => nav(p)}
-                className={`nav-tab ${page === p ? 'active' : ''}`}
-                aria-label={label}
-              >
-                <span className="nav-tab-icon"><Icon size={14} /></span>
-                <span className="nav-tab-label">{label}</span>
-              </button>
-            ))}
-          </nav>
+            <nav className="header-nav">
+              {NAV_ITEMS.map(({ page: p, label, Icon }) => (
+                <button
+                  key={p}
+                  onClick={() => nav(p)}
+                  className={`nav-tab ${page === p ? 'active' : ''}`}
+                  aria-label={label}
+                  title={label}
+                >
+                  <Icon size={18} />
+                </button>
+              ))}
+            </nav>
+          </div>
         </header>
       )}
 

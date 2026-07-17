@@ -38,6 +38,7 @@ export function UnlockPage({ onUnlock }: { onUnlock: () => void }) {
         <button onClick={handleUnlock} disabled={loading} className="btn-primary">
           {loading ? 'Unlocking...' : 'Unlock'}
         </button>
+        <p className="hint">Press Enter to unlock</p>
       </div>
     </div>
   );

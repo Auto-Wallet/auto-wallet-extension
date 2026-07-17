@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { callBackground } from '../api';
+import { WalletIcon, ShieldCheckIcon, ScrollIcon } from '../icons';
 
 type Mode = 'choose' | 'create' | 'import-pk' | 'import-mnemonic' | 'import-ledger';
 type PickedLedgerAccount = { address: string; derivationPath: string; label?: string };
@@ -74,12 +75,24 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
         <h1>Auto Wallet</h1>
         <p className="subtitle">Auto-signing wallet for power users</p>
         <div className="stack stack-sm w-full">
-          <button onClick={() => setMode('create')} className="btn-primary">Create New Wallet</button>
-          <button onClick={() => setMode('import-pk')} className="btn-secondary">Import Private Key</button>
-          <button onClick={() => setMode('import-mnemonic')} className="btn-secondary">Import Mnemonic</button>
+          <button onClick={() => setMode('create')} className="btn-primary">
+            <span className="row gap-sm row-center">
+              <WalletIcon size={18} /> Create New Wallet
+            </span>
+          </button>
+          <button onClick={() => setMode('import-pk')} className="btn-secondary">
+            <span className="row gap-sm row-center">
+              <ShieldCheckIcon size={18} /> Import Private Key
+            </span>
+          </button>
+          <button onClick={() => setMode('import-mnemonic')} className="btn-secondary">
+            <span className="row gap-sm row-center">
+              <ScrollIcon size={18} /> Import Mnemonic
+            </span>
+          </button>
           <button onClick={() => setMode('import-ledger')} className="btn-secondary">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <LedgerLogo size={14} /> Connect Ledger
+            <span className="row gap-sm row-center">
+              <LedgerLogo size={18} /> Connect Ledger
             </span>
           </button>
         </div>
@@ -90,7 +103,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   const passwordReady = password.length >= 8 && password === confirm;
 
   return (
-    <div className="stack stack-sm animate-in" style={{ paddingTop: 8 }}>
+    <div className="stack stack-sm animate-in">
       <p className="page-title">
         {mode === 'create' ? 'Create Wallet'
           : mode === 'import-pk' ? 'Import Private Key'

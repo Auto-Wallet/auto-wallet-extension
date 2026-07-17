@@ -509,6 +509,7 @@ function ConfirmPage() {
         <div className="confirm-origin">
           <span className="confirm-origin-dot" />
           <span className="confirm-origin-text">{domain}</span>
+          <span className="confirm-origin-secure">Secure connection</span>
         </div>
 
         {/* Signer info */}
@@ -557,20 +558,20 @@ function ConfirmPage() {
 
         {/* Transaction details */}
         {isTransaction && (
-          <div className="card" style={{ padding: 12 }}>
-            <div className="confirm-field">
-              <span className="confirm-label">To</span>
-              <span className="confirm-value mono truncate">{to}</span>
-            </div>
-            <div className="confirm-row">
-              <div className="confirm-field">
+          <div className="card">
+            <div className="confirm-row" style={{ alignItems: 'flex-start' }}>
+              <div className="confirm-field" style={{ flex: 1, minWidth: 0 }}>
                 <span className="confirm-label">Value</span>
                 <span className="confirm-value-big">{value} {nativeSymbol}</span>
               </div>
-              <div className="confirm-field" style={{ textAlign: 'right' }}>
+              <div className="confirm-field" style={{ textAlign: 'right', flexShrink: 0 }}>
                 <span className="confirm-label">Method</span>
                 <span className="confirm-value mono">{methodSig}</span>
               </div>
+            </div>
+            <div className="confirm-field" style={{ marginTop: 14 }}>
+              <span className="confirm-label">To</span>
+              <span className="confirm-value mono truncate">{to}</span>
             </div>
             {approvalDetails && (
               <div className="approval-editor">
