@@ -371,6 +371,15 @@ body {
 .btn-ghost.accent:hover { color: var(--accent-hover); background: var(--accent-subtle); }
 .btn-ghost.danger { color: var(--danger); }
 .btn-ghost.danger:hover { background: var(--danger-bg); }
+.btn-ghost:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+.btn-ghost:disabled:hover {
+  background: none;
+  color: var(--text-muted);
+}
 
 .btn-icon-text {
   display: inline-flex;

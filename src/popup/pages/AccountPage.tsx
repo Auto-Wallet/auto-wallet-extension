@@ -558,7 +558,17 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
           </div>
           <div className="input-suffix-wrap">
             <input className="input-field" placeholder={`Amount (${sendSymbol})`} value={sendAmount}
-              onChange={(e) => setSendAmount(e.target.value)} type="text" inputMode="decimal"
+              onChange={(e) => {
+                // Strip non-numerics, then keep at most one decimal point so
+                // `parseUnits`/`parseEther` never receive "1.2.3" and throw downstream.
+                const cleaned = e.target.value.replace(/[^0-9.]/g, '');
+                const firstDot = cleaned.indexOf('.');
+                const normalized = firstDot === -1
+                  ? cleaned
+                  : cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+                setSendAmount(normalized);
+              }}
+              type="text" inputMode="decimal"
               style={{ paddingRight: 58 }} />
             {sendMaxBalance && sendMaxBalance !== '?' && (
               <button onClick={() => setSendAmount(sendMaxBalance)} className="input-suffix-btn">MAX</button>

@@ -109,6 +109,10 @@ export function NetworkPage() {
   }
 
   async function removeNetwork(chainId: number) {
+    // Never delete the network the wallet is currently on — the stored active
+    // chain ID would point at a removed chain and leave the wallet in an
+    // inconsistent state.
+    if (chainId === active) return;
     if (confirmDeleteChainId !== chainId) {
       setConfirmDeleteChainId(chainId);
       return;
@@ -238,6 +242,8 @@ export function NetworkPage() {
                     <button
                       onClick={(e) => { e.stopPropagation(); removeNetwork(n.chainId); }}
                       className="btn-ghost danger"
+                      disabled={isActive}
+                      title={isActive ? 'Cannot delete the active network' : 'Delete network'}
                     >
                       Del
                     </button>
