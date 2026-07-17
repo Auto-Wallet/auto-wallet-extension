@@ -3,6 +3,7 @@ import { callBackground } from '../api';
 import { AccountBadge } from '../AccountBadge';
 import { partitionAccountsForDisplay, type AccountSource, type AccountType } from '../../lib/key-manager.core';
 import { DeleteDangerModal } from '../DeleteDangerModal';
+import { SettingsIcon } from '../icons';
 
 interface AccountInfo {
   id: string;
@@ -16,7 +17,7 @@ interface AccountInfo {
 type AddMode = null | 'create' | 'import-pk' | 'import-mnemonic' | 'import-ledger' | 'watch-only';
 type PickedLedgerAccount = { address: string; derivationPath: string; label?: string };
 
-export function AccountMenu({ onSwitch, onClose }: { onSwitch: () => void; onClose: () => void }) {
+export function AccountMenu({ onSwitch, onClose, onSettings }: { onSwitch: () => void; onClose: () => void; onSettings: () => void }) {
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [activeId, setActiveId] = useState('');
   const [addMode, setAddMode] = useState<AddMode>(null);
@@ -290,9 +291,16 @@ export function AccountMenu({ onSwitch, onClose }: { onSwitch: () => void; onClo
         )}
       </div>
 
-      {/* Lock */}
-      <div className="account-menu-section" style={{ borderBottom: 'none' }}>
-        <button onClick={handleLock} className="account-menu-lock-btn">Lock Wallet</button>
+      {/* Settings + Lock */}
+      <div className="account-menu-section" style={{ borderBottom: 'none', display: 'flex', gap: 8 }}>
+        <button onClick={onSettings} className="account-menu-lock-btn" style={{ flex: 1 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <SettingsIcon size={14} /> Settings
+          </span>
+        </button>
+        <button onClick={handleLock} className="account-menu-lock-btn" style={{ flex: 1 }}>
+          Lock Wallet
+        </button>
       </div>
 
       <DeleteDangerModal

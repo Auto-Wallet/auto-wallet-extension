@@ -302,7 +302,7 @@ export function HistoryPage() {
                       </a>
                     )}
                     <button
-                      className={`tx-detail-toggle ${isOpen ? 'open' : ''}`}
+                      className={`btn-ghost tx-detail-toggle ${isOpen ? 'open' : ''}`}
                       onClick={() => toggleExpanded(entry.id)}
                       title={isOpen ? 'Hide details' : 'Show details'}
                       aria-label={isOpen ? 'Hide details' : 'Show details'}

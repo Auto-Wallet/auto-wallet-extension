@@ -436,8 +436,8 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
       {/* --- Wallet Hero --- */}
       <div className="wallet-hero">
         <div className="wallet-hero-top">
-          <span className="badge badge-network">
-            <span className="pulse-dot" />
+          <span className="hero-network">
+            <span className="hero-network-dot" />
             {network?.name ?? '...'}
           </span>
           <button
@@ -459,7 +459,7 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
 
         <div className="address-row">
           <button onClick={copyAddress} className="address-chip">
-            {active && <AccountBadge source={active.source} size={11} />}
+            {active && <AccountBadge source={active.source} size={12} />}
             {short}
             {copied ? (
               <CheckIcon size={14} className="copy-icon copy-icon-success" />
@@ -472,12 +472,11 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
               href={`https://debank.com/profile/${active.address}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="debank-link"
+              className="hero-refresh-btn"
               title="View portfolio on DeBank"
               aria-label="View portfolio on DeBank"
             >
-              DeBank
-              <ExternalLinkIcon size={11} />
+              <ExternalLinkIcon size={14} />
             </a>
           )}
         </div>
@@ -489,38 +488,30 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
       </div>
 
       {/* Primary actions */}
-      {isWatchOnly ? (
-        <>
-          <div className="watch-only-banner">
-            <AccountBadge source="watchOnly" size={14} />
-            <span>Watch-only address. Send, swap, and signing are disabled.</span>
-          </div>
-          <div className="hero-actions">
-            <button onClick={() => setShowReceive(true)} className="action-btn">
-              <span className="action-btn-icon"><ReceiveIcon size={16} /></span>
-              Receive
-            </button>
-          </div>
-        </>
-      ) : (
-        <div className="hero-actions hero-actions-3">
-          <button onClick={openSendNative} className="action-btn">
-            <span className="action-btn-icon"><SendIcon size={16} /></span>
-            Send
-          </button>
-          <button onClick={() => setShowReceive(true)} className="action-btn">
-            <span className="action-btn-icon"><ReceiveIcon size={16} /></span>
-            Receive
-          </button>
-          <button
-            onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('swap.html') })}
-            className="action-btn"
-          >
-            <span className="action-btn-icon"><SwapIcon size={16} /></span>
-            Swap
-          </button>
+      {isWatchOnly && (
+        <div className="watch-only-banner">
+          <AccountBadge source="watchOnly" size={14} />
+          <span>Watch-only address. Send, swap, and signing are disabled.</span>
         </div>
       )}
+      <div className="hero-actions">
+        <button onClick={openSendNative} className="action-btn" disabled={isWatchOnly}>
+          <span className="action-btn-icon"><SendIcon size={18} /></span>
+          Send
+        </button>
+        <button onClick={() => setShowReceive(true)} className="action-btn">
+          <span className="action-btn-icon"><ReceiveIcon size={18} /></span>
+          Receive
+        </button>
+        <button
+          onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('swap.html') })}
+          className="action-btn"
+          disabled={isWatchOnly}
+        >
+          <span className="action-btn-icon"><SwapIcon size={18} /></span>
+          Swap
+        </button>
+      </div>
 
       {/* Send form */}
       {sendTarget && (
@@ -565,22 +556,26 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
               </div>
             )}
           </div>
-          <div style={{ position: 'relative' }}>
+          <div className="input-suffix-wrap">
             <input className="input-field" placeholder={`Amount (${sendSymbol})`} value={sendAmount}
-              onChange={(e) => setSendAmount(e.target.value)} type="text" inputMode="decimal"
+              onChange={(e) => {
+                // Strip non-numerics, then keep at most one decimal point so
+                // `parseUnits`/`parseEther` never receive "1.2.3" and throw downstream.
+                const cleaned = e.target.value.replace(/[^0-9.]/g, '');
+                const firstDot = cleaned.indexOf('.');
+                const normalized = firstDot === -1
+                  ? cleaned
+                  : cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+                setSendAmount(normalized);
+              }}
+              type="text" inputMode="decimal"
               style={{ paddingRight: 58 }} />
             {sendMaxBalance && sendMaxBalance !== '?' && (
-              <button onClick={() => setSendAmount(sendMaxBalance)}
-                style={{
-                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                  fontSize: 10, fontWeight: 600, color: 'var(--accent)',
-                  background: 'var(--accent-subtle)', border: 'none', borderRadius: 4,
-                  padding: '2px 6px', cursor: 'pointer',
-                }}>MAX</button>
+              <button onClick={() => setSendAmount(sendMaxBalance)} className="input-suffix-btn">MAX</button>
             )}
           </div>
           {sendMaxBalance && sendMaxBalance !== '?' && (
-            <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -4 }}>
+            <p className="input-balance-hint">
               Balance: {parseFloat(sendMaxBalance).toFixed(6)} {sendSymbol}
             </p>
           )}
@@ -653,7 +648,7 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
           return (
             <div key={`${token.chainId}-${token.address}`} className="token-card">
               <div className="row gap-md" style={{ flex: 1, minWidth: 0 }}>
-                <TokenIcon token={token} />
+                <TokenIcon token={token} size={36} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="row gap-xs" style={{ marginBottom: 1 }}>
                     <span className="token-card-symbol">{token.symbol}</span>
@@ -671,19 +666,15 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
                   <div className="token-card-confirm">
                     <button
                       onClick={() => removeToken(token)}
-                      className="token-card-icon-btn danger"
-                      title="Confirm remove"
-                      aria-label="Confirm remove token"
+                      className="token-card-confirm-btn yes"
                     >
-                      <CheckIcon size={14} />
+                      Remove
                     </button>
                     <button
                       onClick={() => setConfirmDeleteId(null)}
-                      className="token-card-icon-btn"
-                      title="Cancel"
-                      aria-label="Cancel"
+                      className="token-card-confirm-btn no"
                     >
-                      <CloseIcon size={14} />
+                      Keep
                     </button>
                   </div>
                 ) : (

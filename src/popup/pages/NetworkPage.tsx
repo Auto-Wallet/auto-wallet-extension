@@ -109,6 +109,10 @@ export function NetworkPage() {
   }
 
   async function removeNetwork(chainId: number) {
+    // Never delete the network the wallet is currently on — the stored active
+    // chain ID would point at a removed chain and leave the wallet in an
+    // inconsistent state.
+    if (chainId === active) return;
     if (confirmDeleteChainId !== chainId) {
       setConfirmDeleteChainId(chainId);
       return;
@@ -167,7 +171,7 @@ export function NetworkPage() {
 
       {/* Results */}
       {search && (
-        <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        <p className="section-label">
           {filtered.length} result{filtered.length !== 1 ? 's' : ''}
         </p>
       )}
@@ -179,7 +183,7 @@ export function NetworkPage() {
       )}
 
       {!search && starred.size > 0 && filtered.some((n) => starred.has(n.chainId)) && (
-        <div className="section-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <div className="row gap-xs section-label">
           <StarIcon size={9} /> Pinned
         </div>
       )}
@@ -188,6 +192,7 @@ export function NetworkPage() {
         const isStarred = starred.has(n.chainId);
         const isActive = n.chainId === active;
         const showAzDivider = !search && starred.size > 0 && n.chainId === firstUnstarredChainId;
+        const isConfirmingDelete = confirmDeleteChainId === n.chainId;
         return (
           <React.Fragment key={n.chainId}>
             {showAzDivider && (
@@ -218,9 +223,31 @@ export function NetworkPage() {
                 <div className="row gap-sm">
                   {isActive && <span className="pulse-dot" />}
                   <button onClick={(e) => { e.stopPropagation(); openEditForm(n); }} className="btn-ghost accent">Edit</button>
-                  <button onClick={(e) => { e.stopPropagation(); removeNetwork(n.chainId); }} className="btn-ghost danger">
-                    {confirmDeleteChainId === n.chainId ? 'Confirm' : 'Del'}
-                  </button>
+                  {isConfirmingDelete ? (
+                    <span className="row gap-xs">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeNetwork(n.chainId); }}
+                        className="btn-ghost danger"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteChainId(null); }}
+                        className="btn-ghost"
+                      >
+                        Keep
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeNetwork(n.chainId); }}
+                      className="btn-ghost danger"
+                      disabled={isActive}
+                      title={isActive ? 'Cannot delete the active network' : 'Delete network'}
+                    >
+                      Del
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

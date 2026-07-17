@@ -118,9 +118,9 @@ export function SettingsPage() {
         {saved && <span style={{ fontSize: 11, color: 'var(--success)', fontWeight: 500 }}>Saved</span>}
       </div>
 
-      {/* Theme */}
+      {/* Appearance */}
       <div className="card">
-        <p className="section-label" style={{ marginBottom: 10 }}>Theme</p>
+        <p className="section-label" style={{ marginBottom: 10 }}>Appearance</p>
         <div className="theme-toggle">
           {([
             { value: 'auto' as const,  label: 'Auto',  Icon: MonitorIcon },
@@ -180,7 +180,7 @@ export function SettingsPage() {
                   onClick={() => setExportAccountId(a.id)}
                   className="export-account-btn"
                 >
-                  <span style={{ fontWeight: 500 }}>{a.label}</span>
+                  <span>{a.label}</span>
                   <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                     {a.address.slice(0, 8)}...{a.address.slice(-6)}
                   </span>
@@ -193,7 +193,7 @@ export function SettingsPage() {
           <div className="stack stack-sm">
             <div className="row row-between">
               <p style={{ fontSize: 12, fontWeight: 500 }}>{exportAccount?.label}</p>
-              <button onClick={closeExport} className="btn-ghost" style={{ fontSize: 10 }}>Cancel</button>
+              <button onClick={closeExport} className="btn-ghost">Cancel</button>
             </div>
 
             <div className="export-warning">
@@ -217,7 +217,7 @@ export function SettingsPage() {
           <div className="stack stack-sm">
             <div className="row row-between">
               <p style={{ fontSize: 12, fontWeight: 500 }}>{exportAccount?.label}</p>
-              <button onClick={closeExport} className="btn-ghost" style={{ fontSize: 10 }}>Done</button>
+              <button onClick={closeExport} className="btn-ghost">Done</button>
             </div>
 
             <div className="export-warning">
@@ -237,7 +237,7 @@ export function SettingsPage() {
             </div>
 
             {exportRevealed && (
-              <button onClick={copyKey} className="btn-secondary" style={{ fontSize: 12 }}>
+              <button onClick={copyKey} className="btn-secondary">
                 {copied ? 'Copied!' : 'Copy to Clipboard'}
               </button>
             )}

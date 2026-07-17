@@ -788,12 +788,16 @@ function QuoteList({
 
 function TokenAvatar({ token }: { token: MergedToken }) {
   const [failed, setFailed] = useState(false);
+  const size = 28;
   if (failed || !token.logo) {
     const hue = token.symbol.split('').reduce((h, c) => h + c.charCodeAt(0), 0) % 360;
     return (
       <span
         className="swap-token-fallback"
-        style={{ background: `hsl(${hue}, 50%, 92%)`, color: `hsl(${hue}, 55%, 38%)` }}
+        style={{
+          width: size, height: size, fontSize: 11,
+          background: `hsl(${hue}, 50%, 92%)`, color: `hsl(${hue}, 55%, 38%)`,
+        }}
       >
         {token.symbol.slice(0, 2).toUpperCase()}
       </span>
@@ -803,8 +807,8 @@ function TokenAvatar({ token }: { token: MergedToken }) {
     <img
       src={token.logo}
       alt={token.symbol}
-      width={20}
-      height={20}
+      width={size}
+      height={size}
       className="swap-token-logo"
       onError={() => setFailed(true)}
     />

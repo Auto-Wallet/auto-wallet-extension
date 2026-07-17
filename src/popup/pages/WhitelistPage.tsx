@@ -103,30 +103,57 @@ export function WhitelistPage() {
         <div className="empty-state">No auto-sign rules yet</div>
       )}
 
-      {rules.map((rule) => (
-        <div key={rule.id} className="card">
-          <div className="row row-between" style={{ marginBottom: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 500 }}>{rule.label}</span>
-            <div className="row gap-xs">
-              <button onClick={() => toggleRule(rule.id, !rule.enabled)}
-                className={`badge ${rule.enabled ? 'badge-on' : 'badge-off'}`}
-                style={{ cursor: 'pointer', border: 'none' }}>
-                {rule.enabled ? 'ON' : 'OFF'}
-              </button>
-              <button onClick={() => deleteRule(rule.id)} className="btn-ghost danger">
-                {confirmDeleteId === rule.id ? 'Confirm' : 'Del'}
-              </button>
+      {rules.map((rule) => {
+        const isConfirmingDelete = confirmDeleteId === rule.id;
+        return (
+          <div key={rule.id} className="card">
+            <div className="row row-between" style={{ marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>{rule.label}</span>
+              <div className="row gap-xs">
+                <button
+                  onClick={() => toggleRule(rule.id, !rule.enabled)}
+                  className={`toggle ${rule.enabled ? 'on' : ''}`}
+                  aria-pressed={rule.enabled}
+                  aria-label={rule.enabled ? 'Disable rule' : 'Enable rule'}
+                  title={rule.enabled ? 'Disable rule' : 'Enable rule'}
+                >
+                  <span className="toggle-knob" />
+                </button>
+                {isConfirmingDelete ? (
+                  <span className="row gap-xs">
+                    <button
+                      onClick={() => deleteRule(rule.id)}
+                      className="btn-ghost danger"
+                    >
+                      Remove
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="btn-ghost"
+                    >
+                      Keep
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => deleteRule(rule.id)}
+                    className="btn-ghost danger"
+                  >
+                    Del
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="rule-detail">
+              {rule.origin && <div>origin: {rule.origin}</div>}
+              {rule.contractAddress && <div>to: {rule.contractAddress.slice(0, 14)}...</div>}
+              {rule.methodSig && <div>method: {rule.methodSig}</div>}
+              {rule.maxValueEth && <div>max: {rule.maxValueEth} ETH</div>}
+              {rule.maxGasLimit && <div>gas cap: {rule.maxGasLimit}</div>}
             </div>
           </div>
-          <div className="rule-detail">
-            {rule.origin && <div>origin: {rule.origin}</div>}
-            {rule.contractAddress && <div>to: {rule.contractAddress.slice(0, 14)}...</div>}
-            {rule.methodSig && <div>method: {rule.methodSig}</div>}
-            {rule.maxValueEth && <div>max: {rule.maxValueEth} ETH</div>}
-            {rule.maxGasLimit && <div>gas cap: {rule.maxGasLimit}</div>}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
