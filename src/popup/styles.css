@@ -188,10 +188,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* --- App Shell --- */
+/* --- App Shell ---
+   The browser sizes the action popup to fit this document, so the document must
+   never outgrow the 360x600 box a popup is allowed to occupy. Pinning the shell
+   to that box keeps long pages (Chains, History) scrolling inside .app-main
+   rather than stretching the document: Dia jumps the popup window to its
+   maximum size in *both* axes as soon as the document overflows, which is why
+   those two pages opened ~800px wide there while Wallet and Rules were fine. */
+body:has(.app-shell) {
+  height: 600px;
+  overflow: hidden;
+}
+
 .app-shell {
   width: 360px;
-  min-height: 520px;
+  height: 600px;
   display: flex;
   flex-direction: column;
   background: var(--bg-root);
@@ -259,6 +270,7 @@ body {
 /* --- Main --- */
 .app-main {
   flex: 1;
+  min-height: 0; /* without this the flex item refuses to shrink below its content and scrolls the document instead */
   overflow-y: auto;
   padding: var(--space-4);
 }
