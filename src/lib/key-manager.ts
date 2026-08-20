@@ -35,6 +35,14 @@ let masterPassword: string | null = null;
 let lockTimer: ReturnType<typeof setTimeout> | null = null;
 let lastActivity: number = Date.now();
 
+type LockListener = () => void | Promise<void>;
+const lockListeners: LockListener[] = [];
+
+/** Register a callback that runs after the wallet locks (auto-lock, popup lock, delete). */
+export function addLockListener(fn: LockListener): void {
+  lockListeners.push(fn);
+}
+
 // --- Session persistence (survives SW restarts, cleared on browser close) ---
 
 const SESSION_KEY = 'aw_session';
@@ -449,6 +457,9 @@ export async function lock(): Promise<void> {
   masterPassword = null;
   if (lockTimer) { clearTimeout(lockTimer); lockTimer = null; }
   await clearSession();
+  for (const fn of [...lockListeners]) {
+    await fn();
+  }
 }
 
 export async function hasWallet(): Promise<boolean> {

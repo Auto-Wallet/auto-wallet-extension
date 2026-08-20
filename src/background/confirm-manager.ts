@@ -5,6 +5,8 @@ import { addRule } from '../lib/whitelist';
 import type { WhitelistRule } from '../types/whitelist';
 import { createPopupWindow } from './window-utils';
 import type { SimulationPreview } from './bcs-simulation';
+import { createConfirmQueue } from './confirm-queue';
+import { addLockListener } from '../lib/key-manager';
 
 export interface FeeOverride {
   type: 'eip1559' | 'legacy';
@@ -27,12 +29,7 @@ export interface ConfirmResult {
   signature?: `0x${string}` | null;
 }
 
-interface PendingConfirmation {
-  id: string;
-  resolve: (result: ConfirmResult) => void;
-}
-
-const pendingConfirmations = new Map<string, PendingConfirmation>();
+const confirmQueue = createConfirmQueue<ConfirmResult>();
 
 export interface SerializedTxJSON {
   type: 'eip1559' | 'legacy';
@@ -89,13 +86,24 @@ async function cleanupRequest(id: string): Promise<void> {
   await chrome.storage.session.remove([`confirm_${id}`, simulationKey(id)]);
 }
 
+/** Reject every in-flight confirmation and close its popup. Called on wallet lock. */
+export async function rejectAllPendingConfirmations(): Promise<void> {
+  const { ids, windowIds } = confirmQueue.rejectAll();
+  await Promise.all([
+    ...ids.map((id) => cleanupRequest(id)),
+    ...windowIds.map((windowId) => chrome.windows.remove(windowId).catch(() => undefined)),
+  ]);
+}
+
+addLockListener(rejectAllPendingConfirmations);
+
 /** Open a confirmation popup and wait for user to approve or reject. */
 export function requestUserConfirmation(
   request: ConfirmRequest,
   options?: RequestUserConfirmationOptions,
 ): Promise<ConfirmResult> {
   return new Promise(async (resolve) => {
-    pendingConfirmations.set(request.id, { id: request.id, resolve });
+    confirmQueue.add(request.id, resolve);
 
     const storedRequest: ConfirmRequest = options?.simulationPromise
       ? { ...request, simulationPending: true, simulation: undefined }
@@ -125,10 +133,27 @@ export function requestUserConfirmation(
     const url = chrome.runtime.getURL(`confirm.html?id=${request.id}`);
 
     const window = await createPopupWindow(url, 360, 740);
+
+    // Auto-lock (or another cancel) may have drained the queue while the
+    // popup was opening. Close the leftover window and do not re-resolve.
+    if (!confirmQueue.has(request.id)) {
+      await cleanupRequest(request.id);
+      if (window?.id != null) {
+        chrome.windows.remove(window.id).catch(() => undefined);
+      }
+      return;
+    }
+
     if (!window) {
       await cleanupRequest(request.id);
-      pendingConfirmations.delete(request.id);
-      resolve({ approved: false });
+      const pending = confirmQueue.take(request.id);
+      pending?.resolve({ approved: false });
+      return;
+    }
+
+    if (!confirmQueue.setWindowId(request.id, window.id!)) {
+      await cleanupRequest(request.id);
+      chrome.windows.remove(window.id!).catch(() => undefined);
       return;
     }
 
@@ -136,9 +161,8 @@ export function requestUserConfirmation(
       if (windowId === window.id) {
         chrome.windows.onRemoved.removeListener(onRemoved);
         cleanupRequest(request.id);
-        const pending = pendingConfirmations.get(request.id);
+        const pending = confirmQueue.take(request.id);
         if (pending) {
-          pendingConfirmations.delete(request.id);
           pending.resolve({ approved: false });
         }
       }
@@ -152,9 +176,8 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message?.source !== MSG_SOURCE) return;
   if (message.type !== 'confirm_response') return;
 
-  const pending = pendingConfirmations.get(message.requestId);
+  const pending = confirmQueue.take(message.requestId);
   if (pending) {
-    pendingConfirmations.delete(message.requestId);
     cleanupRequest(message.requestId);
     pending.resolve({
       approved: message.approved === true,
