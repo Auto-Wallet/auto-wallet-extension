@@ -27,7 +27,6 @@ interface ReplaceableEntry {
   prevHash?: string;
   replacedHashes?: string[];
   replacementKind?: ReplacementKind;
-  cancelHashes?: string[];
 }
 
 /**
@@ -66,42 +65,27 @@ export function isCancelTx(tx: MinedTx): boolean {
 }
 
 /**
- * Old cancel rows (written before cancelHashes) only know their latest hash
- * and one prevHash, and prevHash may itself be an earlier cancel. Their label
- * can only be decided from the contents of the tx that mined.
+ * Rows that were ever cancelled need the mined tx's contents: any of their
+ * same-nonce txs may be the original, a sped-up copy or a cancel, and old
+ * rows don't record which hash is which. One rule for old and new rows.
  */
 export function needsMinedTx(e: ReplaceableEntry): boolean {
-  return e.replacementKind === 'cancel' && e.cancelHashes === undefined;
-}
-
-/** Hashes of this row's cancel txs. Old rows lack the list; their latest hash is the cancel. */
-function cancelHashesOf(e: ReplaceableEntry): string[] {
-  if (e.cancelHashes) return e.cancelHashes;
-  return e.replacementKind === 'cancel' && e.hash ? [e.hash] : [];
-}
-
-/**
- * The cancelHashes list to store after broadcasting `newHash`. Speeding up a
- * cancel re-sends the cancel (a 0-value self-transfer), so it is a cancel too.
- */
-export function cancelHashesAfterReplace(e: ReplaceableEntry, kind: ReplacementKind, newHash: string): string[] {
-  const isCancelTx = kind === 'cancel' || e.replacementKind === 'cancel';
-  const known = cancelHashesOf(e);
-  return isCancelTx ? [...new Set([...known, newHash])] : known;
+  return e.replacementKind === 'cancel';
 }
 
 /**
  * The row's replacement kind once `minedHash` is known. Only one same-nonce tx
- * mines: if it is a cancel tx the row is a cancel; if the original (or a
- * sped-up copy of it) won the race, the transfer went through and the row
- * must not say "cancelled".
+ * mines: if it is a cancel the row is a cancel; if the original (or a sped-up
+ * copy of it) won the race, the transfer went through and the row must not
+ * say "cancelled".
  */
 export function kindAfterMined(e: ReplaceableEntry, minedHash: string, minedTx?: MinedTx): ReplacementKind | undefined {
   if (needsMinedTx(e)) {
-    if (!minedTx) throw new Error('kindAfterMined: an old cancel row needs the mined tx');
+    if (!minedTx) throw new Error('kindAfterMined: a cancelled row needs the mined tx');
     if (isCancelTx(minedTx)) return 'cancel';
   }
-  if (cancelHashesOf(e).includes(minedHash)) return 'cancel';
+  // Not a cancel. Old rows may have lost older hashes, so "original" is the
+  // oldest one we know; at worst a sped-up copy is shown without its badge.
   const original = e.replacedHashes?.[0] ?? e.prevHash ?? e.hash;
   return minedHash === original ? undefined : 'speedup';
 }

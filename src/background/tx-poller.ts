@@ -30,7 +30,7 @@ async function finalize(
     ? gasUsed * effectiveGasPrice
     : null;
   const minedHash = receipt.transactionHash;
-  // Old cancel rows need the mined tx's contents to tell a cancel from the transfer.
+  // Cancelled rows need the mined tx's contents to tell a cancel from the transfer.
   const current = (await txLogger.getLog()).find((e) => e.id === logId);
   let minedTx: MinedTx | undefined;
   if (current && needsMinedTx(current)) {

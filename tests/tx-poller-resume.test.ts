@@ -94,8 +94,9 @@ test('after two speed-ups, the first tx is still checked', async () => {
 
 test('cancel failed: the original transfer mined first, so the row is not shown as cancelled', async () => {
   // Cancel broadcast (hash = cancel tx, never mined), worker restarted, original (MINED) landed.
+  minedTx = { to: '0x' + '33'.repeat(20), value: '0x3e8' }; // the original transfer
   await fake.chrome.storage.local.set({
-    tx_log: [{ ...row('c', STILL_PENDING), value: '1000', prevHash: MINED, replacedHashes: [MINED], cancelHashes: [STILL_PENDING], replacementKind: 'cancel' }],
+    tx_log: [{ ...row('c', STILL_PENDING), value: '1000', prevHash: MINED, replacedHashes: [MINED], replacementKind: 'cancel' }],
   });
   await checkPendingTxs();
   const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
@@ -105,12 +106,27 @@ test('cancel failed: the original transfer mined first, so the row is not shown 
 });
 
 test('cancel succeeded: the cancel tx mined, so the row stays a cancel', async () => {
+  minedTx = { to: ME, value: '0x0' }; // the cancel
   await fake.chrome.storage.local.set({
-    tx_log: [{ ...row('c', MINED), prevHash: STILL_PENDING, replacedHashes: [STILL_PENDING], cancelHashes: [MINED], replacementKind: 'cancel' }],
+    tx_log: [{ ...row('c', MINED), prevHash: STILL_PENDING, replacedHashes: [STILL_PENDING], replacementKind: 'cancel' }],
   });
   await checkPendingTxs();
   const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
   expect(entry.status).toBe('confirmed');
+  expect(entry.replacementKind).toBe('cancel');
+});
+
+test('old cancel row sped up again after the upgrade: an early cancel C1 that mined is still a cancel (review P2, round 3)', async () => {
+  // Old row hash=C2, prevHash=C1 (both cancels), then sped up to C3 by the new code.
+  const C2 = '0x' + 'c2'.repeat(32);
+  minedTx = { to: ME, value: '0x0' }; // C1 (MINED) is a cancel
+  await fake.chrome.storage.local.set({
+    tx_log: [{ ...row('c', STILL_PENDING), prevHash: C2, replacedHashes: [MINED, C2], cancelHashes: [C2, STILL_PENDING], replacementKind: 'cancel' }],
+  });
+  await checkPendingTxs();
+  const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
+  expect(entry.status).toBe('confirmed');
+  expect(entry.hash).toBe(MINED);
   expect(entry.replacementKind).toBe('cancel');
 });
 

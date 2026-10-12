@@ -21,7 +21,7 @@ import { emitAccountsChanged, emitChainChanged } from './events';
 import { toHex } from 'viem';
 import { applyGasPolicy, clampEstimatedFees, computeReplacementFees, resolveReplacementFees } from '../lib/gas';
 import { pollTxReceipt } from './tx-poller';
-import { supersededHashes, cancelHashesAfterReplace } from '../lib/tx-resume.core';
+import { supersededHashes } from '../lib/tx-resume.core';
 import { parseNonceInput, sendWithNonce } from '../lib/nonce';
 import { openLedgerPickerWindow } from './ledger-picker-manager';
 
@@ -960,7 +960,6 @@ async function replacePendingTx(logId: string, kind: 'speedup' | 'cancel'): Prom
     hash,
     prevHash: entry.hash,
     replacedHashes: supersededHashes(entry),
-    cancelHashes: cancelHashesAfterReplace(entry, kind, hash),
     nonce: original.nonce,
     // A cancel always wins the label; a speed-up after a cancel keeps 'cancel'.
     replacementKind: kind === 'cancel' ? 'cancel' : (entry.replacementKind ?? 'speedup'),

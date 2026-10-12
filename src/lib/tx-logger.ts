@@ -22,9 +22,6 @@ export interface TxLogEntry {
   // Every superseded hash, oldest first. Any of them may be the one that
   // mines, so the restart check looks them all up.
   replacedHashes?: string[];
-  // Hashes of the cancel txs among them (a sped-up cancel is still a cancel),
-  // so the final status can tell "cancelled" from "the original went through".
-  cancelHashes?: string[];
 
   // ERC-20 transfer sent from the wallet's Send form. `to` is then the token
   // contract and `value` the native value (0); this holds what moved.
