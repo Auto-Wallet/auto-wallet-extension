@@ -22,6 +22,9 @@ export interface TxLogEntry {
   // Every superseded hash, oldest first. Any of them may be the one that
   // mines, so the restart check looks them all up.
   replacedHashes?: string[];
+  // Hashes of the cancel txs among them (a sped-up cancel is still a cancel),
+  // so the final status can tell "cancelled" from "the original went through".
+  cancelHashes?: string[];
 
   // ERC-20 transfer sent from the wallet's Send form. `to` is then the token
   // contract and `value` the native value (0); this holds what moved.
@@ -62,6 +65,11 @@ export async function appendLog(entry: TxLogEntry): Promise<void> {
 export async function updateLogEntry(id: string, patch: Partial<TxLogEntry>): Promise<void> {
   // An entry trimmed off the end of the log is simply gone; nothing to update.
   await updateLog((log) => log.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+}
+
+/** Patch an entry computed from its current value, inside the same queued update. */
+export async function updateLogEntryWith(id: string, patch: (entry: TxLogEntry) => Partial<TxLogEntry>): Promise<void> {
+  await updateLog((log) => log.map((e) => (e.id === id ? { ...e, ...patch(e) } : e)));
 }
 
 export async function clearLog(): Promise<void> {

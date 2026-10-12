@@ -82,6 +82,28 @@ test('after two speed-ups, the first tx is still checked', async () => {
   expect(entry.hash).toBe(MINED);
 });
 
+test('cancel failed: the original transfer mined first, so the row is not shown as cancelled', async () => {
+  // Cancel broadcast (hash = cancel tx, never mined), worker restarted, original (MINED) landed.
+  await fake.chrome.storage.local.set({
+    tx_log: [{ ...row('c', STILL_PENDING), value: '1000', prevHash: MINED, replacedHashes: [MINED], cancelHashes: [STILL_PENDING], replacementKind: 'cancel' }],
+  });
+  await checkPendingTxs();
+  const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
+  expect(entry.status).toBe('confirmed');
+  expect(entry.hash).toBe(MINED);
+  expect(entry.replacementKind).toBeUndefined();
+});
+
+test('cancel succeeded: the cancel tx mined, so the row stays a cancel', async () => {
+  await fake.chrome.storage.local.set({
+    tx_log: [{ ...row('c', MINED), prevHash: STILL_PENDING, replacedHashes: [STILL_PENDING], cancelHashes: [MINED], replacementKind: 'cancel' }],
+  });
+  await checkPendingTxs();
+  const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
+  expect(entry.status).toBe('confirmed');
+  expect(entry.replacementKind).toBe('cancel');
+});
+
 test('alarm is cleared once nothing is left to check', async () => {
   fake.state.alarms.set(TX_RESUME_ALARM, { periodInMinutes: 1 });
   await fake.chrome.storage.local.set({ tx_log: [row('mined', MINED)] });

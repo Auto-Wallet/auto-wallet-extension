@@ -5,7 +5,7 @@ import { TransactionReceiptNotFoundError, type TransactionReceipt } from 'viem';
 import * as networkManager from '../lib/network-manager';
 import * as txLogger from '../lib/tx-logger';
 import { notifyTx } from '../lib/notify';
-import { selectResumableTxs, receiptCandidates } from '../lib/tx-resume.core';
+import { selectResumableTxs, receiptCandidates, kindAfterMined } from '../lib/tx-resume.core';
 import { acquireKeepAlive } from './keepalive';
 
 /** Periodic alarm that re-checks pending rows if the worker was stopped mid-poll. */
@@ -29,16 +29,18 @@ async function finalize(
     ? gasUsed * effectiveGasPrice
     : null;
   const minedHash = receipt.transactionHash;
-  await txLogger.updateLogEntry(logId, {
+  await txLogger.updateLogEntryWith(logId, (entry) => ({
     // Point the row at the hash that actually mined. For a normal send this
     // equals `hash`; for a replacement where the competing tx won, it
     // corrects a link that would otherwise be permanently broken.
     hash: minedHash,
+    // Label by the tx that won: a cancel whose original mined first is not "cancelled".
+    replacementKind: kindAfterMined(entry, minedHash),
     status,
     gasUsed: gasUsed?.toString(),
     effectiveGasPrice: effectiveGasPrice?.toString(),
     feeWei: fee?.toString(),
-  });
+  }));
   notifyTx(minedHash, origin, autoSigned, status, explorerUrl);
 }
 

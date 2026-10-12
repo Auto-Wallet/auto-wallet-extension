@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { selectResumableTxs, receiptCandidates, supersededHashes, RESUME_MAX_AGE_MS } from '../src/lib/tx-resume.core';
+import { selectResumableTxs, receiptCandidates, supersededHashes, cancelHashesAfterReplace, kindAfterMined, RESUME_MAX_AGE_MS } from '../src/lib/tx-resume.core';
 
 const NOW = 1_700_000_000_000;
 
@@ -52,5 +52,46 @@ describe('supersededHashes', () => {
   });
   test('a row without a hash cannot be replaced', () => {
     expect(() => supersededHashes({})).toThrow(/hash/);
+  });
+});
+
+describe('cancelHashesAfterReplace', () => {
+  test('a speed-up of a plain send adds no cancel hash', () => {
+    expect(cancelHashesAfterReplace({ hash: '0xa' }, 'speedup', '0xb')).toEqual([]);
+  });
+  test('a cancel records its own hash', () => {
+    expect(cancelHashesAfterReplace({ hash: '0xa' }, 'cancel', '0xb')).toEqual(['0xb']);
+  });
+  test('speeding up a cancel is still a cancel', () => {
+    expect(cancelHashesAfterReplace({ hash: '0xb', replacementKind: 'cancel', cancelHashes: ['0xb'] }, 'speedup', '0xc')).toEqual(['0xb', '0xc']);
+  });
+  test('an old cancel row without cancelHashes treats its current hash as the cancel', () => {
+    expect(cancelHashesAfterReplace({ hash: '0xb', prevHash: '0xa', replacementKind: 'cancel' }, 'speedup', '0xc')).toEqual(['0xb', '0xc']);
+  });
+});
+
+describe('kindAfterMined (review: cancel shown although the original mined)', () => {
+  const cancelled = { hash: '0xc', prevHash: '0xa', replacedHashes: ['0xa'], replacementKind: 'cancel' as const, cancelHashes: ['0xc'] };
+  test('the cancel tx mined → cancel', () => {
+    expect(kindAfterMined(cancelled, '0xc')).toBe('cancel');
+  });
+  test('the original mined before the cancel → a plain send, not "cancelled"', () => {
+    expect(kindAfterMined(cancelled, '0xa')).toBeUndefined();
+  });
+  test('a sped-up copy of the original mined before the cancel → speedup', () => {
+    const row = { hash: '0xc', prevHash: '0xb', replacedHashes: ['0xa', '0xb'], replacementKind: 'cancel' as const, cancelHashes: ['0xc'] };
+    expect(kindAfterMined(row, '0xb')).toBe('speedup');
+  });
+  test('speed-up: the replacement mined → speedup; the original mined → plain', () => {
+    const sped = { hash: '0xb', prevHash: '0xa', replacedHashes: ['0xa'], replacementKind: 'speedup' as const };
+    expect(kindAfterMined(sped, '0xb')).toBe('speedup');
+    expect(kindAfterMined(sped, '0xa')).toBeUndefined();
+  });
+  test('a plain send stays plain', () => {
+    expect(kindAfterMined({ hash: '0xa' }, '0xa')).toBeUndefined();
+  });
+  test('an old cancel row (prevHash only): the original mining is not shown as cancelled', () => {
+    expect(kindAfterMined({ hash: '0xc', prevHash: '0xa', replacementKind: 'cancel' }, '0xa')).toBeUndefined();
+    expect(kindAfterMined({ hash: '0xc', prevHash: '0xa', replacementKind: 'cancel' }, '0xc')).toBe('cancel');
   });
 });
