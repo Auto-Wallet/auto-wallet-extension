@@ -7,6 +7,9 @@ const { closeOrphanedPopups } = await import('../src/background/orphan-popups');
 
 const MINED = '0x' + 'aa'.repeat(32);
 const STILL_PENDING = '0x' + 'bb'.repeat(32);
+const ME = '0x' + '22'.repeat(20);
+// What eth_getTransactionByHash returns for MINED; tests set it per case.
+let minedTx: { to: string; value: string } = { to: '0x' + '33'.repeat(20), value: '0x5' };
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (_url: string, init: RequestInit) => {
@@ -21,6 +24,13 @@ globalThis.fetch = (async (_url: string, init: RequestInit) => {
         cumulativeGasUsed: '0x5208', effectiveGasPrice: '0x3b9aca00', from: '0x' + '22'.repeat(20),
         gasUsed: '0x5208', logs: [], logsBloom: '0x' + '00'.repeat(256), status: '0x1',
         to: '0x' + '33'.repeat(20), transactionHash: MINED, transactionIndex: '0x0', type: '0x2',
+      };
+    }
+    if (req.method === 'eth_getTransactionByHash' && req.params[0] === MINED) {
+      result = {
+        blockHash: '0x' + '11'.repeat(32), blockNumber: '0x10', from: ME, gas: '0x5208', gasPrice: '0x3b9aca00',
+        hash: MINED, input: '0x', nonce: '0x3', to: minedTx.to, transactionIndex: '0x0', value: minedTx.value,
+        type: '0x0', v: '0x25', r: '0x' + '01'.repeat(32), s: '0x' + '02'.repeat(32), chainId: '0x1',
       };
     }
     return { jsonrpc: '2.0', id: req.id, result };
@@ -102,6 +112,26 @@ test('cancel succeeded: the cancel tx mined, so the row stays a cancel', async (
   const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
   expect(entry.status).toBe('confirmed');
   expect(entry.replacementKind).toBe('cancel');
+});
+
+test('old cancel row: an earlier cancel tx (prevHash) that mined keeps the row a cancel (review P2)', async () => {
+  // Old format, cancel C1 (MINED) then sped up to C2: only hash/prevHash, no cancelHashes.
+  minedTx = { to: ME, value: '0x0' }; // C1 is a 0-value send to self
+  await fake.chrome.storage.local.set({ tx_log: [{ ...row('c', STILL_PENDING), prevHash: MINED, replacementKind: 'cancel' }] });
+  await checkPendingTxs();
+  const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
+  expect(entry.status).toBe('confirmed');
+  expect(entry.hash).toBe(MINED);
+  expect(entry.replacementKind).toBe('cancel');
+});
+
+test('old cancel row: the original transfer that mined is shown as a transfer', async () => {
+  minedTx = { to: '0x' + '33'.repeat(20), value: '0x5' };
+  await fake.chrome.storage.local.set({ tx_log: [{ ...row('c', STILL_PENDING), prevHash: MINED, replacementKind: 'cancel' }] });
+  await checkPendingTxs();
+  const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
+  expect(entry.status).toBe('confirmed');
+  expect(entry.replacementKind).toBeUndefined();
 });
 
 test('alarm is cleared once nothing is left to check', async () => {

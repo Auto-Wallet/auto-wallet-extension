@@ -5,7 +5,7 @@ import { TransactionReceiptNotFoundError, type TransactionReceipt } from 'viem';
 import * as networkManager from '../lib/network-manager';
 import * as txLogger from '../lib/tx-logger';
 import { notifyTx } from '../lib/notify';
-import { selectResumableTxs, receiptCandidates, kindAfterMined } from '../lib/tx-resume.core';
+import { selectResumableTxs, receiptCandidates, kindAfterMined, needsMinedTx, type MinedTx } from '../lib/tx-resume.core';
 import { acquireKeepAlive } from './keepalive';
 
 /** Periodic alarm that re-checks pending rows if the worker was stopped mid-poll. */
@@ -17,6 +17,7 @@ const polling = new Set<string>();
 /** Write the mined result into the history row and fire the result notification. */
 async function finalize(
   logId: string,
+  chainId: number,
   receipt: TransactionReceipt,
   origin: string,
   autoSigned: boolean,
@@ -29,13 +30,20 @@ async function finalize(
     ? gasUsed * effectiveGasPrice
     : null;
   const minedHash = receipt.transactionHash;
+  // Old cancel rows need the mined tx's contents to tell a cancel from the transfer.
+  const current = (await txLogger.getLog()).find((e) => e.id === logId);
+  let minedTx: MinedTx | undefined;
+  if (current && needsMinedTx(current)) {
+    const client = await networkManager.getClient(chainId);
+    minedTx = await client.getTransaction({ hash: minedHash });
+  }
   await txLogger.updateLogEntryWith(logId, (entry) => ({
     // Point the row at the hash that actually mined. For a normal send this
     // equals `hash`; for a replacement where the competing tx won, it
     // corrects a link that would otherwise be permanently broken.
     hash: minedHash,
     // Label by the tx that won: a cancel whose original mined first is not "cancelled".
-    replacementKind: kindAfterMined(entry, minedHash),
+    replacementKind: kindAfterMined(entry, minedHash, minedTx),
     status,
     gasUsed: gasUsed?.toString(),
     effectiveGasPrice: effectiveGasPrice?.toString(),
@@ -78,7 +86,7 @@ export function pollTxReceipt(
         pollingInterval: 5000,
         timeout: 300_000, // ~5 min, matching the old 60 × 5s attempt budget
       });
-      await finalize(logId, receipt, origin, autoSigned, explorerUrl);
+      await finalize(logId, chainId, receipt, origin, autoSigned, explorerUrl);
     } catch (err) {
       // Timed out, or the tx could not be tracked (e.g. dropped from the
       // mempool) — leave the row pending; the resume alarm keeps checking.
@@ -125,7 +133,7 @@ export async function checkPendingTxs(): Promise<void> {
       stillPending++;
       continue;
     }
-    await finalize(entry.id, receipt, entry.origin, entry.autoSigned, network.blockExplorerUrl);
+    await finalize(entry.id, entry.chainId, receipt, entry.origin, entry.autoSigned, network.blockExplorerUrl);
   }
 
   if (stillPending > 0) {

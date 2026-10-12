@@ -49,6 +49,31 @@ export function supersededHashes(e: ReplaceableEntry): string[] {
   return [...new Set([...older, e.hash])];
 }
 
+/** The fields of a mined tx that tell a cancel from the original transfer. */
+export interface MinedTx {
+  from: string;
+  to: string | null;
+  value: bigint;
+  input: string;
+}
+
+/** A cancel is a 0-value send with no data to the sender's own address (see replacePendingTx). */
+export function isCancelTx(tx: MinedTx): boolean {
+  return tx.to !== null
+    && tx.to.toLowerCase() === tx.from.toLowerCase()
+    && tx.value === 0n
+    && (tx.input === '0x' || tx.input === '');
+}
+
+/**
+ * Old cancel rows (written before cancelHashes) only know their latest hash
+ * and one prevHash, and prevHash may itself be an earlier cancel. Their label
+ * can only be decided from the contents of the tx that mined.
+ */
+export function needsMinedTx(e: ReplaceableEntry): boolean {
+  return e.replacementKind === 'cancel' && e.cancelHashes === undefined;
+}
+
 /** Hashes of this row's cancel txs. Old rows lack the list; their latest hash is the cancel. */
 function cancelHashesOf(e: ReplaceableEntry): string[] {
   if (e.cancelHashes) return e.cancelHashes;
@@ -71,7 +96,11 @@ export function cancelHashesAfterReplace(e: ReplaceableEntry, kind: ReplacementK
  * sped-up copy of it) won the race, the transfer went through and the row
  * must not say "cancelled".
  */
-export function kindAfterMined(e: ReplaceableEntry, minedHash: string): ReplacementKind | undefined {
+export function kindAfterMined(e: ReplaceableEntry, minedHash: string, minedTx?: MinedTx): ReplacementKind | undefined {
+  if (needsMinedTx(e)) {
+    if (!minedTx) throw new Error('kindAfterMined: an old cancel row needs the mined tx');
+    if (isCancelTx(minedTx)) return 'cancel';
+  }
   if (cancelHashesOf(e).includes(minedHash)) return 'cancel';
   const original = e.replacedHashes?.[0] ?? e.prevHash ?? e.hash;
   return minedHash === original ? undefined : 'speedup';

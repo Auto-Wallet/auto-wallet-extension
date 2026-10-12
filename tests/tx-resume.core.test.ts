@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { selectResumableTxs, receiptCandidates, supersededHashes, cancelHashesAfterReplace, kindAfterMined, RESUME_MAX_AGE_MS } from '../src/lib/tx-resume.core';
+import { selectResumableTxs, receiptCandidates, supersededHashes, cancelHashesAfterReplace, kindAfterMined, needsMinedTx, isCancelTx, RESUME_MAX_AGE_MS } from '../src/lib/tx-resume.core';
 
 const NOW = 1_700_000_000_000;
 
@@ -90,8 +90,39 @@ describe('kindAfterMined (review: cancel shown although the original mined)', ()
   test('a plain send stays plain', () => {
     expect(kindAfterMined({ hash: '0xa' }, '0xa')).toBeUndefined();
   });
-  test('an old cancel row (prevHash only): the original mining is not shown as cancelled', () => {
-    expect(kindAfterMined({ hash: '0xc', prevHash: '0xa', replacementKind: 'cancel' }, '0xa')).toBeUndefined();
-    expect(kindAfterMined({ hash: '0xc', prevHash: '0xa', replacementKind: 'cancel' }, '0xc')).toBe('cancel');
+});
+
+describe('old cancel rows without cancelHashes (review: prevHash may itself be a cancel)', () => {
+  const ME = '0x00000000000000000000000000000000000000aa';
+  const cancelTx = { from: ME, to: ME.toUpperCase().replace('0X', '0x'), value: 0n, input: '0x' as const };
+  const transferTx = { from: ME, to: '0x00000000000000000000000000000000000000bb', value: 5n, input: '0x' as const };
+  // Cancel C1, then sped up to C2: the old format kept only hash=C2, prevHash=C1.
+  const legacy = { hash: '0xc2', prevHash: '0xc1', replacementKind: 'cancel' as const };
+
+  test('only old cancel rows need the mined tx fetched', () => {
+    expect(needsMinedTx(legacy)).toBe(true);
+    expect(needsMinedTx({ ...legacy, cancelHashes: ['0xc2'] })).toBe(false);
+    expect(needsMinedTx({ hash: '0xb', prevHash: '0xa', replacementKind: 'speedup' })).toBe(false);
+    expect(needsMinedTx({ hash: '0xa' })).toBe(false);
+  });
+
+  test('isCancelTx: 0-value, no-data send to yourself', () => {
+    expect(isCancelTx(cancelTx)).toBe(true);
+    expect(isCancelTx(transferTx)).toBe(false);
+    expect(isCancelTx({ ...cancelTx, value: 1n })).toBe(false);
+    expect(isCancelTx({ ...cancelTx, input: '0x1234' })).toBe(false);
+    expect(isCancelTx({ ...cancelTx, to: null })).toBe(false);
+  });
+
+  test('the earlier cancel C1 mined → still a cancel', () => {
+    expect(kindAfterMined(legacy, '0xc1', cancelTx)).toBe('cancel');
+  });
+
+  test('the original transfer mined → not a cancel', () => {
+    expect(kindAfterMined({ hash: '0xc', prevHash: '0xa', replacementKind: 'cancel' }, '0xa', transferTx)).toBeUndefined();
+  });
+
+  test('the mined tx is required for an old cancel row', () => {
+    expect(() => kindAfterMined(legacy, '0xc1')).toThrow(/mined tx/);
   });
 });
