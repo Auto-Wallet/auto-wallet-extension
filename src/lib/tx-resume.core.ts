@@ -19,3 +19,28 @@ export function selectResumableTxs<T extends ResumableEntry>(log: T[], now: numb
     && now - e.timestamp < RESUME_MAX_AGE_MS,
   );
 }
+
+interface ReplaceableEntry {
+  hash?: string;
+  prevHash?: string;
+  replacedHashes?: string[];
+}
+
+/**
+ * Every hash that could hold this row's receipt. After a speed-up or cancel,
+ * any of the same-nonce txs may be the one that mined — including the
+ * original, if it landed before the replacement.
+ */
+export function receiptCandidates(e: ReplaceableEntry): string[] {
+  if (!e.hash) return [];
+  // Rows written before replacedHashes existed only kept the last one in prevHash.
+  const older = e.replacedHashes ?? (e.prevHash ? [e.prevHash] : []);
+  return [...new Set([e.hash, ...older])];
+}
+
+/** The replacedHashes list to store when the row's current hash is being replaced. */
+export function supersededHashes(e: ReplaceableEntry): string[] {
+  if (!e.hash) throw new Error('Cannot replace a transaction that has no hash');
+  const older = e.replacedHashes ?? (e.prevHash ? [e.prevHash] : []);
+  return [...new Set([...older, e.hash])];
+}

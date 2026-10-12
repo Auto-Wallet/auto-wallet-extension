@@ -109,9 +109,17 @@ describe('parseWatchAssetParams', () => {
 });
 
 describe('isForegroundTab', () => {
-  test('only the active tab of its window counts', () => {
-    expect(isForegroundTab({ tab: { active: true } as chrome.tabs.Tab })).toBe(true);
-    expect(isForegroundTab({ tab: { active: false } as chrome.tabs.Tab })).toBe(false);
-    expect(isForegroundTab({})).toBe(false);
+  const tab = (active: boolean) => ({ active, windowId: 3 }) as chrome.tabs.Tab;
+  test('needs the active tab of the focused window', () => {
+    expect(isForegroundTab({ tab: tab(true) }, { id: 3, focused: true })).toBe(true);
+    expect(isForegroundTab({ tab: tab(true) }, { id: 3, focused: false })).toBe(false);
+    expect(isForegroundTab({ tab: tab(false) }, { id: 3, focused: true })).toBe(false);
+  });
+  test('the window must be the tab\'s own window', () => {
+    expect(isForegroundTab({ tab: tab(true) }, { id: 4, focused: true })).toBe(false);
+  });
+  test('no tab or no window means not foreground', () => {
+    expect(isForegroundTab({}, { id: 3, focused: true })).toBe(false);
+    expect(isForegroundTab({ tab: tab(true) }, null)).toBe(false);
   });
 });

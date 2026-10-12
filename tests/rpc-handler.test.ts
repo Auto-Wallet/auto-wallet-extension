@@ -171,6 +171,21 @@ describe('connected site', () => {
     expect(await networkManager.getActiveChainId()).toBe(1);
   });
 
+  test('switch chain from the active tab of an unfocused window is refused (review P2)', async () => {
+    // Window 2 is open behind the focused window 1; its active tab is not what the user sees.
+    const unfocused = pageSender(`${DAPP}/app`, { active: true, windowId: 2 });
+    await expectRpcError(handleRpcMethod('wallet_switchEthereumChain', [{ chainId: '0x89' }], DAPP, unfocused), 4001, /tab/);
+    const params = [{ chainId: '0x89', chainName: 'Polygon', rpcUrls: ['https://polygon.drpc.org'], nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 } }];
+    await expectRpcError(handleRpcMethod('wallet_addEthereumChain', params, DAPP, unfocused), 4001);
+    expect(await networkManager.getActiveChainId()).toBe(1);
+  });
+
+  test('switch chain from a sender without a tab is refused', async () => {
+    const noTab = { id: 'test-ext-id', url: `${DAPP}/app`, origin: DAPP } as chrome.runtime.MessageSender;
+    await expectRpcError(handleRpcMethod('wallet_switchEthereumChain', [{ chainId: '0x89' }], DAPP, noTab), 4001);
+    expect(await networkManager.getActiveChainId()).toBe(1);
+  });
+
   test('switch chain from the foreground tab switches and emits chainChanged once', async () => {
     fake.state.tabs = [{ id: 7, windowId: 1, active: true }];
     expect(await handleRpcMethod('wallet_switchEthereumChain', [{ chainId: '0x89' }], DAPP, fg)).toBeNull();

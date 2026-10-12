@@ -58,6 +58,30 @@ test('a pending row whose receipt exists is finalized and notified after a resta
   expect(fake.state.alarms.has(TX_RESUME_ALARM)).toBe(true);
 });
 
+test('after a speed-up, an original tx that mined first is found after a restart (review P2)', async () => {
+  // Row as replacePendingTx leaves it: `hash` = replacement (never mined), `prevHash` = original.
+  await fake.chrome.storage.local.set({ tx_log: [{ ...row('sped', STILL_PENDING), prevHash: MINED, replacementKind: 'speedup' }] });
+
+  await checkPendingTxs();
+
+  const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
+  expect(entry.status).toBe('confirmed');
+  expect(entry.hash).toBe(MINED); // the row now points at the tx that landed
+  expect(fake.state.notifications.map((n) => n.id)).toEqual([`tx-${MINED}`]);
+  expect(fake.state.alarms.has(TX_RESUME_ALARM)).toBe(false);
+});
+
+test('after two speed-ups, the first tx is still checked', async () => {
+  const middle = '0x' + 'cc'.repeat(32);
+  await fake.chrome.storage.local.set({
+    tx_log: [{ ...row('twice', STILL_PENDING), prevHash: middle, replacedHashes: [MINED, middle], replacementKind: 'speedup' }],
+  });
+  await checkPendingTxs();
+  const entry = (fake.chrome.storage.local._dump().tx_log as any[])[0];
+  expect(entry.status).toBe('confirmed');
+  expect(entry.hash).toBe(MINED);
+});
+
 test('alarm is cleared once nothing is left to check', async () => {
   fake.state.alarms.set(TX_RESUME_ALARM, { periodInMinutes: 1 });
   await fake.chrome.storage.local.set({ tx_log: [row('mined', MINED)] });

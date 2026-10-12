@@ -20,6 +20,25 @@ export async function setItems(items: Record<string, unknown>): Promise<void> {
   await storage().set(items);
 }
 
+// Per-key queue of read-change-write updates. Two updates that both read the
+// old list and write it back would lose one change (e.g. bring back a site the
+// user just disconnected), so updates to the same key run one at a time.
+// Only the background writes these keys, so a queue in this context is enough.
+const updateQueues = new Map<string, Promise<unknown>>();
+
+/** Read `key`, apply `change`, write the result — never interleaved with another update of `key`. */
+export function updateItem<T>(key: string, change: (current: T | null) => T | Promise<T>): Promise<T> {
+  const prev = updateQueues.get(key) ?? Promise.resolve();
+  const run = prev.then(async () => {
+    const next = await change(await getItem<T>(key));
+    await setItem(key, next);
+    return next;
+  });
+  // The queue only needs to know when `run` is done; its error goes to the caller via `run`.
+  updateQueues.set(key, run.then(() => undefined, () => undefined));
+  return run;
+}
+
 export async function removeItem(key: string): Promise<void> {
   await storage().remove(key);
 }

@@ -1,6 +1,6 @@
 // IO shell for per-site connection permissions. Logic lives in connected-sites.core.ts.
 
-import { getItem, setItem, setItems, STORAGE_KEYS } from './storage';
+import { getItem, setItems, updateItem, STORAGE_KEYS } from './storage';
 import { addSite, removeSite, isConnected, legacyOriginsToSeed, type ConnectedSite } from './connected-sites.core';
 import type { WhitelistRule } from '../types/whitelist';
 import type { TxLogEntry } from './tx-logger';
@@ -35,11 +35,13 @@ export async function isSiteConnected(origin: string): Promise<boolean> {
 }
 
 export async function connectSite(origin: string): Promise<void> {
-  await setItem(STORAGE_KEYS.CONNECTED_SITES, addSite(await getConnectedSites(), origin, Date.now()));
+  await ensureSeeded();
+  await updateItem<ConnectedSite[]>(STORAGE_KEYS.CONNECTED_SITES, (sites) => addSite(sites ?? [], origin, Date.now()));
 }
 
 export async function disconnectSite(origin: string): Promise<void> {
-  await setItem(STORAGE_KEYS.CONNECTED_SITES, removeSite(await getConnectedSites(), origin));
+  await ensureSeeded();
+  await updateItem<ConnectedSite[]>(STORAGE_KEYS.CONNECTED_SITES, (sites) => removeSite(sites ?? [], origin));
 }
 
 /**

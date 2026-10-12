@@ -108,7 +108,16 @@ export function parseWatchAssetParams(raw: unknown): WatchAssetRequest {
 
 // --- Tab focus ---
 
-/** True when the request came from the tab the user is looking at (the active tab of its window). */
-export function isForegroundTab(sender: Pick<chrome.runtime.MessageSender, 'tab'>): boolean {
-  return sender.tab?.active === true;
+/**
+ * True when the request came from the tab the user is looking at: the active
+ * tab of the focused window. `tab.active` alone is true for the front tab of
+ * every window, including windows behind the one in use.
+ */
+export function isForegroundTab(
+  sender: Pick<chrome.runtime.MessageSender, 'tab'>,
+  window: { id?: number; focused: boolean } | null,
+): boolean {
+  const tab = sender.tab;
+  if (!tab || tab.active !== true || !window) return false;
+  return window.id === tab.windowId && window.focused === true;
 }

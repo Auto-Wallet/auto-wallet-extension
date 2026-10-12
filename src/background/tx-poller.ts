@@ -5,7 +5,7 @@ import { TransactionReceiptNotFoundError, type TransactionReceipt } from 'viem';
 import * as networkManager from '../lib/network-manager';
 import * as txLogger from '../lib/tx-logger';
 import { notifyTx } from '../lib/notify';
-import { selectResumableTxs } from '../lib/tx-resume.core';
+import { selectResumableTxs, receiptCandidates } from '../lib/tx-resume.core';
 import { acquireKeepAlive } from './keepalive';
 
 /** Periodic alarm that re-checks pending rows if the worker was stopped mid-poll. */
@@ -107,15 +107,19 @@ export async function checkPendingTxs(): Promise<void> {
     const network = networks.find((n) => n.chainId === entry.chainId);
     if (!network) continue; // chain was removed; nothing to poll
     const client = await networkManager.getClient(entry.chainId);
-    let receipt: TransactionReceipt;
-    try {
-      receipt = await client.getTransactionReceipt({ hash: entry.hash as `0x${string}` });
-    } catch (err) {
-      if (err instanceof TransactionReceiptNotFoundError) {
-        stillPending++;
-        continue;
+    // Same-nonce txs: at most one of them can mine, so the first receipt found is the result.
+    let receipt: TransactionReceipt | null = null;
+    for (const hash of receiptCandidates(entry)) {
+      try {
+        receipt = await client.getTransactionReceipt({ hash: hash as `0x${string}` });
+        break;
+      } catch (err) {
+        if (!(err instanceof TransactionReceiptNotFoundError)) {
+          console.warn(`[Auto-Wallet] Receipt check for ${hash} failed:`, err);
+        }
       }
-      console.warn(`[Auto-Wallet] Receipt check for ${entry.hash} failed:`, err);
+    }
+    if (!receipt) {
       stillPending++;
       continue;
     }

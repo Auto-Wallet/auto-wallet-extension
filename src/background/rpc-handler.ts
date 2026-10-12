@@ -268,14 +268,17 @@ async function switchToChain(chainId: number): Promise<void> {
  * Requests from background tabs are refused (not silently "succeeded"), so the
  * dApp doesn't go on believing it is on the chain it asked for.
  */
-function assertForeground(method: string, sender: chrome.runtime.MessageSender, internal: boolean): void {
-  if (internal || isForegroundTab(sender)) return;
+async function assertForeground(method: string, sender: chrome.runtime.MessageSender, internal: boolean): Promise<void> {
+  if (internal) return;
+  const windowId = sender.tab?.windowId;
+  const window = windowId === undefined ? null : await chrome.windows.get(windowId);
+  if (isForegroundTab(sender, window)) return;
   throw userRejection(`Ignored ${method}: only the tab you are viewing can switch networks`);
 }
 
 async function handleSwitchChain(params: unknown[], sender: chrome.runtime.MessageSender, internal: boolean): Promise<null> {
   const id = parseSwitchChainParams(params);
-  assertForeground('wallet_switchEthereumChain', sender, internal);
+  await assertForeground('wallet_switchEthereumChain', sender, internal);
 
   // EIP-3326: signal "unrecognized chain" with code 4902 so dapps (wagmi/viem)
   // can fall back to wallet_addEthereumChain instead of treating it as a generic failure.
@@ -298,7 +301,7 @@ async function handleAddChain(
   internal: boolean,
 ): Promise<null> {
   const parsed = parseAddChainParams(params);
-  assertForeground('wallet_addEthereumChain', sender, internal);
+  await assertForeground('wallet_addEthereumChain', sender, internal);
 
   // If chain already exists, just switch to it
   const all = await networkManager.getAllNetworks();

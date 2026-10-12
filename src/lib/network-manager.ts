@@ -4,7 +4,7 @@
 import { createPublicClient, createWalletClient, http, type PublicClient, type WalletClient } from 'viem';
 import type { PrivateKeyAccount } from 'viem/accounts';
 import { type Network, PRESET_NETWORKS } from '../types/network';
-import { getItem, setItem, STORAGE_KEYS } from './storage';
+import { getItem, setItem, updateItem, STORAGE_KEYS } from './storage';
 import {
   findNetwork,
   validateCustomNetwork,
@@ -35,12 +35,17 @@ function buildClient(network: Network): PublicClient {
  *  - new presets shipped in an update get appended
  */
 export async function seedPresetsIfNeeded(): Promise<void> {
-  const stored = (await getItem<Network[]>(STORAGE_KEYS.NETWORKS)) ?? [];
   const seededIds = (await getItem<number[]>(STORAGE_KEYS.SEEDED_PRESET_IDS)) ?? [];
-  const result = computePresetsToSeed(stored, seededIds, PRESET_NETWORKS);
-  if (!result.changed) return;
-  await setItem(STORAGE_KEYS.NETWORKS, result.networks);
-  await setItem(STORAGE_KEYS.SEEDED_PRESET_IDS, result.seededIds);
+  let newSeededIds: number[] | null = null;
+  // Same queue as add/update/remove, so a network added during startup is kept.
+  await updateItem<Network[]>(STORAGE_KEYS.NETWORKS, (stored) => {
+    const result = computePresetsToSeed(stored ?? [], seededIds, PRESET_NETWORKS);
+    if (!result.changed) return stored ?? [];
+    newSeededIds = result.seededIds;
+    return result.networks;
+  });
+  // Written after the list, as before: a crash in between re-seeds instead of losing presets.
+  if (newSeededIds) await setItem(STORAGE_KEYS.SEEDED_PRESET_IDS, newSeededIds);
 }
 
 export async function getAllNetworks(): Promise<Network[]> {
@@ -71,28 +76,26 @@ export async function switchNetwork(chainId: number): Promise<Network> {
 
 /** Add a brand-new network. Throws if a network with this chainId already exists. */
 export async function addCustomNetwork(network: Network): Promise<void> {
-  const all = await getAllNetworks();
-  validateCustomNetwork(all, network);
-  const updated = upsertCustomNetwork(all, network);
-  await setItem(STORAGE_KEYS.NETWORKS, updated);
+  await updateItem<Network[]>(STORAGE_KEYS.NETWORKS, (all) => {
+    validateCustomNetwork(all ?? [], network);
+    return upsertCustomNetwork(all ?? [], network);
+  });
   clientCache.delete(network.chainId);
 }
 
 /** Update an existing network in place (used by the edit form). */
 export async function updateNetwork(network: Network): Promise<void> {
-  const all = await getAllNetworks();
-  if (!findNetwork(all, network.chainId)) {
-    throw new Error(`Chain ${network.chainId} not found`);
-  }
-  const updated = upsertCustomNetwork(all, network);
-  await setItem(STORAGE_KEYS.NETWORKS, updated);
+  await updateItem<Network[]>(STORAGE_KEYS.NETWORKS, (all) => {
+    if (!findNetwork(all ?? [], network.chainId)) {
+      throw new Error(`Chain ${network.chainId} not found`);
+    }
+    return upsertCustomNetwork(all ?? [], network);
+  });
   clientCache.delete(network.chainId);
 }
 
 export async function removeCustomNetwork(chainId: number): Promise<void> {
-  const all = await getAllNetworks();
-  const filtered = removeFromList(all, chainId);
-  await setItem(STORAGE_KEYS.NETWORKS, filtered);
+  const filtered = await updateItem<Network[]>(STORAGE_KEYS.NETWORKS, (all) => removeFromList(all ?? [], chainId));
   clientCache.delete(chainId);
   if (activeChainId === chainId) {
     // Pick the first remaining network if any, otherwise fall back to Ethereum.

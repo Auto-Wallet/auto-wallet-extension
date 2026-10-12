@@ -1,6 +1,6 @@
 // IO shell: reads rules from chrome.storage, delegates decisions to whitelist.core.
 import type { WhitelistRule, AutoSignResult } from '../types/whitelist';
-import { getItem, setItem, STORAGE_KEYS } from './storage';
+import { getItem, updateItem, STORAGE_KEYS } from './storage';
 import { evaluateRules, type TxContext } from './whitelist.core';
 
 // Re-export core types and functions for backward compatibility
@@ -14,29 +14,24 @@ export async function getRules(): Promise<WhitelistRule[]> {
   return (await getItem<WhitelistRule[]>(STORAGE_KEYS.WHITELIST_RULES)) ?? [];
 }
 
-export async function saveRules(rules: WhitelistRule[]): Promise<void> {
-  await setItem(STORAGE_KEYS.WHITELIST_RULES, rules);
+function updateRules(change: (rules: WhitelistRule[]) => WhitelistRule[]): Promise<WhitelistRule[]> {
+  return updateItem<WhitelistRule[]>(STORAGE_KEYS.WHITELIST_RULES, (rules) => change(rules ?? []));
 }
 
 export async function addRule(rule: WhitelistRule): Promise<void> {
-  const rules = await getRules();
-  rules.push(rule);
-  await saveRules(rules);
+  await updateRules((rules) => [...rules, rule]);
 }
 
 export async function updateRule(id: string, patch: Partial<WhitelistRule>): Promise<void> {
-  const rules = await getRules();
-  const idx = rules.findIndex((r) => r.id === id);
-  if (idx < 0) throw new Error(`Rule not found: ${id}`);
-  const existing = rules[idx];
-  if (!existing) throw new Error(`Rule not found: ${id}`);
-  rules[idx] = { ...existing, ...patch };
-  await saveRules(rules);
+  await updateRules((rules) => {
+    const existing = rules.find((r) => r.id === id);
+    if (!existing) throw new Error(`Rule not found: ${id}`);
+    return rules.map((r) => (r.id === id ? { ...existing, ...patch } : r));
+  });
 }
 
 export async function removeRule(id: string): Promise<void> {
-  const rules = await getRules();
-  await saveRules(rules.filter((r) => r.id !== id));
+  await updateRules((rules) => rules.filter((r) => r.id !== id));
 }
 
 // --- Matching (thin IO wrapper around pure evaluateRules) ---

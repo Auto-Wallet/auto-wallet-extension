@@ -1,4 +1,4 @@
-import { getItem, setItem, STORAGE_KEYS } from './storage';
+import { getItem, setItem, updateItem, STORAGE_KEYS } from './storage';
 
 export interface TxLogEntry {
   id: string;
@@ -19,6 +19,9 @@ export interface TxLogEntry {
   // can still cross-reference the original on an explorer.
   replacementKind?: 'speedup' | 'cancel';
   prevHash?: string;
+  // Every superseded hash, oldest first. Any of them may be the one that
+  // mines, so the restart check looks them all up.
+  replacedHashes?: string[];
 
   // ERC-20 transfer sent from the wallet's Send form. `to` is then the token
   // contract and `value` the native value (0); this holds what moved.
@@ -48,24 +51,19 @@ export async function getLog(): Promise<TxLogEntry[]> {
   return (await getItem<TxLogEntry[]>(STORAGE_KEYS.TX_LOG)) ?? [];
 }
 
+function updateLog(change: (log: TxLogEntry[]) => TxLogEntry[]): Promise<TxLogEntry[]> {
+  return updateItem<TxLogEntry[]>(STORAGE_KEYS.TX_LOG, (log) => change(log ?? []));
+}
+
 export async function appendLog(entry: TxLogEntry): Promise<void> {
-  const log = await getLog();
-  log.unshift(entry); // newest first
-  if (log.length > MAX_LOG_SIZE) log.length = MAX_LOG_SIZE;
-  await setItem(STORAGE_KEYS.TX_LOG, log);
+  await updateLog((log) => [entry, ...log].slice(0, MAX_LOG_SIZE)); // newest first
 }
 
 export async function updateLogEntry(id: string, patch: Partial<TxLogEntry>): Promise<void> {
-  const log = await getLog();
-  const idx = log.findIndex((e) => e.id === id);
-  if (idx >= 0) {
-    const existing = log[idx];
-    if (!existing) return;
-    log[idx] = { ...existing, ...patch };
-    await setItem(STORAGE_KEYS.TX_LOG, log);
-  }
+  // An entry trimmed off the end of the log is simply gone; nothing to update.
+  await updateLog((log) => log.map((e) => (e.id === id ? { ...e, ...patch } : e)));
 }
 
 export async function clearLog(): Promise<void> {
-  await setItem(STORAGE_KEYS.TX_LOG, []);
+  await updateLog(() => []);
 }

@@ -7,7 +7,7 @@ import * as connectedSites from '../lib/connected-sites';
 import { getClient } from '../lib/network-manager';
 import { handleRpcMethod } from './rpc-handler';
 import { getMulticall3Address } from '../lib/multicall';
-import { getItem, setItem, STORAGE_KEYS } from '../lib/storage';
+import { getItem, setItem, updateItem, STORAGE_KEYS } from '../lib/storage';
 import {
   formatEther, formatUnits, parseEther, parseUnits, encodeFunctionData, erc20Abi, hexToBigInt,
   serializeTransaction, createWalletClient, http, parseTransaction, type TransactionSerializable,
@@ -21,6 +21,7 @@ import { emitAccountsChanged, emitChainChanged } from './events';
 import { toHex } from 'viem';
 import { applyGasPolicy, clampEstimatedFees, computeReplacementFees, resolveReplacementFees } from '../lib/gas';
 import { pollTxReceipt } from './tx-poller';
+import { supersededHashes } from '../lib/tx-resume.core';
 import { parseNonceInput, sendWithNonce } from '../lib/nonce';
 import { openLedgerPickerWindow } from './ledger-picker-manager';
 
@@ -549,10 +550,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
       return { ...DEFAULT_SETTINGS, ...s };
     }
     case 'saveSettings': {
-      const current = await getItem<WalletSettings>(STORAGE_KEYS.SETTINGS);
-      const merged = { ...DEFAULT_SETTINGS, ...current, ...payload };
-      await setItem(STORAGE_KEYS.SETTINGS, merged);
-      return merged;
+      return updateItem<WalletSettings>(STORAGE_KEYS.SETTINGS, (current) => ({ ...DEFAULT_SETTINGS, ...current, ...payload }));
     }
 
     default:
@@ -961,6 +959,7 @@ async function replacePendingTx(logId: string, kind: 'speedup' | 'cancel'): Prom
   await txLogger.updateLogEntry(logId, {
     hash,
     prevHash: entry.hash,
+    replacedHashes: supersededHashes(entry),
     nonce: original.nonce,
     // A cancel always wins the label; a speed-up after a cancel keeps 'cancel'.
     replacementKind: kind === 'cancel' ? 'cancel' : (entry.replacementKind ?? 'speedup'),
