@@ -4,6 +4,11 @@ import {
   checkSafetyCaps,
   evaluateRules,
   normalizeOrigin,
+  isRuleExpired,
+  buildTrustRule,
+  TRUST_DURATIONS_MS,
+  MANUAL_RULE_EXPIRY_OPTIONS,
+  expiryLabel,
   type TxContext,
 } from '../src/lib/whitelist.core';
 import type { WhitelistRule } from '../src/types/whitelist';
@@ -373,5 +378,115 @@ describe('evaluateRules', () => {
     const ctx = makeCtx({ value: '1000000000000000000', gasLimit: '300000' });
     const result = evaluateRules(rules, ctx);
     expect(result.allowed).toBe(true);
+  });
+});
+
+
+// =============================================================
+// Rule expiry (time-limited auto-sign)
+// =============================================================
+
+describe('rule expiry', () => {
+  const NOW = 1_700_000_000_000;
+
+  test('rule without expiresAt never expires (pre-existing rules keep working)', () => {
+    const legacy = makeRule({ origin: 'https://app.uniswap.org' });
+    delete (legacy as any).expiresAt;
+    expect(isRuleExpired(legacy, NOW)).toBe(false);
+    expect(isRuleExpired(makeRule({ expiresAt: null }), NOW)).toBe(false);
+  });
+
+  test('rule expires exactly at expiresAt', () => {
+    const rule = makeRule({ expiresAt: NOW + 1000 });
+    expect(isRuleExpired(rule, NOW + 999)).toBe(false);
+    expect(isRuleExpired(rule, NOW + 1000)).toBe(true);
+  });
+
+  test('expired rule does not auto-sign; same rule before expiry does', () => {
+    const rule = makeRule({ origin: 'https://app.uniswap.org', expiresAt: NOW + 60_000 });
+    expect(evaluateRules([rule], makeCtx(), NOW + 59_999).allowed).toBe(true);
+    const after = evaluateRules([rule], makeCtx(), NOW + 60_000);
+    expect(after.allowed).toBe(false);
+    expect(after.rule).toBeUndefined();
+  });
+
+  test('an expired rule is skipped so a later live rule can still match', () => {
+    const expired = makeRule({ id: 'old', origin: 'https://app.uniswap.org', expiresAt: NOW - 1 });
+    const live = makeRule({ id: 'new', origin: 'https://app.uniswap.org', expiresAt: NOW + 5000 });
+    const result = evaluateRules([expired, live], makeCtx(), NOW);
+    expect(result.allowed).toBe(true);
+    expect(result.rule?.id).toBe('new');
+  });
+});
+
+describe('buildTrustRule', () => {
+  const NOW = 1_700_000_000_000;
+
+  test('builds an origin-only rule that ends after the chosen duration', () => {
+    const oneHour = TRUST_DURATIONS_MS[1]!;
+    const rule = buildTrustRule('https://app.uniswap.org/swap?x=1', oneHour, NOW, 'id-1');
+    expect(rule).toEqual({
+      id: 'id-1',
+      label: 'Trust: https://app.uniswap.org',
+      enabled: true,
+      origin: 'https://app.uniswap.org',
+      contractAddress: null,
+      methodSig: null,
+      maxValueEth: null,
+      maxGasLimit: null,
+      chainId: null,
+      createdAt: NOW,
+      expiresAt: NOW + oneHour,
+    });
+  });
+
+  test('rejects durations outside the allowed list, including "forever"', () => {
+    for (const d of [0, -1, 12345, Infinity, NaN]) {
+      expect(() => buildTrustRule('https://a.example', d, NOW, 'x')).toThrow();
+    }
+  });
+
+  test('allowed durations are all finite and at most 24 hours', () => {
+    expect(TRUST_DURATIONS_MS.length).toBeGreaterThan(0);
+    for (const d of TRUST_DURATIONS_MS) {
+      expect(Number.isFinite(d)).toBe(true);
+      expect(d).toBeGreaterThan(0);
+      expect(d).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+    }
+  });
+});
+
+describe('expiryLabel', () => {
+  const base = { id: 'r', label: 'r', enabled: true, origin: 'a.com', contractAddress: null, methodSig: null, maxValueEth: null, maxGasLimit: null, chainId: null, createdAt: 0 } as WhitelistRule;
+  const now = 1_700_000_000_000;
+  const MIN = 60_000;
+
+  test('rules with no expiry say so', () => {
+    expect(expiryLabel(base, now)).toBe('No expiry');
+    expect(expiryLabel({ ...base, expiresAt: null }, now)).toBe('No expiry');
+  });
+
+  test('expired at or after the expiry time', () => {
+    expect(expiryLabel({ ...base, expiresAt: now }, now)).toBe('Expired');
+    expect(expiryLabel({ ...base, expiresAt: now - 1 }, now)).toBe('Expired');
+  });
+
+  test('time left, rounded up to the next unit shown', () => {
+    expect(expiryLabel({ ...base, expiresAt: now + 1 }, now)).toBe('1m left');
+    expect(expiryLabel({ ...base, expiresAt: now + 14 * MIN + 1 }, now)).toBe('15m left');
+    expect(expiryLabel({ ...base, expiresAt: now + 60 * MIN }, now)).toBe('1h left');
+    expect(expiryLabel({ ...base, expiresAt: now + 90 * MIN }, now)).toBe('1h 30m left');
+    expect(expiryLabel({ ...base, expiresAt: now + 7 * 24 * 60 * MIN }, now)).toBe('7d left');
+    expect(expiryLabel({ ...base, expiresAt: now + (2 * 24 * 60 + 3 * 60) * MIN }, now)).toBe('2d 3h left');
+  });
+});
+
+describe('MANUAL_RULE_EXPIRY_OPTIONS', () => {
+  const MIN_MS = 60_000;
+  test('offers the trust durations plus 7 days and an explicit no-expiry choice', () => {
+    const ms = MANUAL_RULE_EXPIRY_OPTIONS.map((o) => o.ms);
+    for (const d of TRUST_DURATIONS_MS) expect(ms).toContain(d);
+    expect(ms).toContain(7 * 24 * 60 * MIN_MS);
+    expect(ms).toContain(null);
   });
 });

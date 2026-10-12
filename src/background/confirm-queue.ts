@@ -41,6 +41,17 @@ export function createConfirmQueue<T extends { approved: boolean } = { approved:
       return entry;
     },
 
+    /** Ids and popup windows of requests still waiting for an answer. */
+    snapshot(): { ids: Set<string>; windowIds: Set<number> } {
+      const ids = new Set<string>();
+      const windowIds = new Set<number>();
+      for (const entry of pending.values()) {
+        ids.add(entry.id);
+        if (entry.windowId !== null) windowIds.add(entry.windowId);
+      }
+      return { ids, windowIds };
+    },
+
     rejectAll(): { ids: string[]; windowIds: number[] } {
       const ids: string[] = [];
       const windowIds: number[] = [];

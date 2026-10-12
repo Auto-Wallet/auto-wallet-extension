@@ -104,3 +104,48 @@ describe('encrypted data structure', () => {
     expect(() => atob(encrypted.salt)).not.toThrow();
   });
 });
+
+// =============================================================
+// Vault key (v2): one derived key seals every account
+// =============================================================
+
+import { createVaultKey, deriveVaultKey, importVaultKey, seal, unseal } from '../src/lib/crypto';
+
+describe('vault key', () => {
+  test('seal → unseal round-trip with the derived key', async () => {
+    const { key, kdf } = await createVaultKey('pw-one');
+    const sealed = await seal('0xsecret', key);
+    expect(await unseal(sealed, key)).toBe('0xsecret');
+    expect(kdf.iterations).toBe(600_000);
+  });
+
+  test('re-deriving from the same password and salt opens what was sealed', async () => {
+    const { key, kdf } = await createVaultKey('pw-two');
+    const sealed = await seal('mnemonic words here', key);
+    const again = await deriveVaultKey('pw-two', kdf);
+    expect(await unseal(sealed, again.key)).toBe('mnemonic words here');
+  });
+
+  test('wrong password cannot open it', async () => {
+    const { key, kdf } = await createVaultKey('right');
+    const sealed = await seal('x', key);
+    const wrong = await deriveVaultKey('wrong', kdf);
+    await expect(unseal(sealed, wrong.key)).rejects.toThrow();
+  });
+
+  test('exported raw key re-imports to a working key (session restore)', async () => {
+    const { key, raw } = await createVaultKey('pw-three');
+    const sealed = await seal('payload', key);
+    const restored = await importVaultKey(raw);
+    expect(await unseal(sealed, restored)).toBe('payload');
+    expect(raw).not.toContain('pw-three');
+  });
+
+  test('each seal uses a fresh IV', async () => {
+    const { key } = await createVaultKey('pw');
+    const a = await seal('same', key);
+    const b = await seal('same', key);
+    expect(a.iv).not.toBe(b.iv);
+    expect(a.ciphertext).not.toBe(b.ciphertext);
+  });
+});

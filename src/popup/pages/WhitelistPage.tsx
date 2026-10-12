@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { callBackground } from '../api';
 import type { WhitelistRule } from '../../types/whitelist';
+import { MANUAL_RULE_EXPIRY_OPTIONS, expiryLabel, isRuleExpired } from '../../lib/whitelist.core';
+
+const DEFAULT_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 export function WhitelistPage() {
   const [rules, setRules] = useState<WhitelistRule[]>([]);
@@ -14,7 +17,14 @@ export function WhitelistPage() {
   const [enableOrigin, setEnableOrigin] = useState(true);
   const [enableContract, setEnableContract] = useState(false);
   const [enableMethod, setEnableMethod] = useState(false);
+  const [expiryMs, setExpiryMs] = useState<number | null>(DEFAULT_EXPIRY_MS);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // Re-render every 30 s so the "time left" text stays current.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => { loadRules(); }, []);
 
@@ -25,6 +35,7 @@ export function WhitelistPage() {
 
   async function addRule() {
     if (!label.trim()) return;
+    const createdAt = Date.now();
     const rule: WhitelistRule = {
       id: crypto.randomUUID(),
       label: label.trim(),
@@ -35,7 +46,8 @@ export function WhitelistPage() {
       maxValueEth: maxValueEth.trim() || null,
       maxGasLimit: maxGasLimit.trim() || null,
       chainId: null,
-      createdAt: Date.now(),
+      createdAt,
+      expiresAt: expiryMs === null ? null : createdAt + expiryMs,
     };
     await callBackground('addRule', rule);
     resetForm();
@@ -62,6 +74,7 @@ export function WhitelistPage() {
     setLabel(''); setOrigin(''); setContractAddress(''); setMethodSig('');
     setMaxValueEth(''); setMaxGasLimit('');
     setEnableOrigin(true); setEnableContract(false); setEnableMethod(false);
+    setExpiryMs(DEFAULT_EXPIRY_MS);
   }
 
   return (
@@ -95,6 +108,29 @@ export function WhitelistPage() {
             <input className="input-field" placeholder="Max gas" value={maxGasLimit} onChange={(e) => setMaxGasLimit(e.target.value)} />
           </div>
 
+          <div className="stack stack-xs">
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expires after</span>
+            <div className="row gap-xs" style={{ flexWrap: 'wrap' }}>
+              {MANUAL_RULE_EXPIRY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.label}
+                  type="button"
+                  onClick={() => setExpiryMs(opt.ms)}
+                  className={`theme-option ${expiryMs === opt.ms ? 'active' : ''}`}
+                  aria-pressed={expiryMs === opt.ms}
+                  style={{ flex: 1, minWidth: 44 }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {expiryMs === null && (
+              <div className="confirm-warning" style={{ fontSize: 11 }}>
+                This rule will auto-sign matching requests until you turn it off or delete it.
+              </div>
+            )}
+          </div>
+
           <button onClick={addRule} className="btn-primary">Save Rule</button>
         </div>
       )}
@@ -105,8 +141,9 @@ export function WhitelistPage() {
 
       {rules.map((rule) => {
         const isConfirmingDelete = confirmDeleteId === rule.id;
+        const expired = isRuleExpired(rule, now);
         return (
-          <div key={rule.id} className="card">
+          <div key={rule.id} className="card" style={expired ? { opacity: 0.6 } : undefined}>
             <div className="row row-between" style={{ marginBottom: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 500 }}>{rule.label}</span>
               <div className="row gap-xs">
@@ -150,6 +187,7 @@ export function WhitelistPage() {
               {rule.methodSig && <div>method: {rule.methodSig}</div>}
               {rule.maxValueEth && <div>max: {rule.maxValueEth} ETH</div>}
               {rule.maxGasLimit && <div>gas cap: {rule.maxGasLimit}</div>}
+              <div style={expired ? { color: 'var(--danger)' } : undefined}>expires: {expiryLabel(rule, now)}</div>
             </div>
           </div>
         );

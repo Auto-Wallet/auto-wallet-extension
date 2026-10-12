@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Auto Wallet",
-  "version": "0.18.3",
+  "version": "0.19.0",
   "description": "Minimal auto-signing wallet for EVM chains",
-  "permissions": ["storage", "windows", "notifications"],
+  "permissions": ["storage", "windows", "notifications", "alarms"],
   "host_permissions": [
     "https://balance-change-simulate-api.wanscan.org/*",
     "https://api.coingecko.com/*",

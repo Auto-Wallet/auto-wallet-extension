@@ -1,5 +1,5 @@
 import type { Token } from '../types/token';
-import { getItem, setItem, STORAGE_KEYS } from './storage';
+import { getItem, updateItem, STORAGE_KEYS } from './storage';
 import { getClient } from './network-manager';
 import { erc20Abi, formatUnits, getAddress } from 'viem';
 
@@ -9,14 +9,25 @@ export async function getTokens(): Promise<Token[]> {
   return (await getItem<Token[]>(STORAGE_KEYS.TOKENS)) ?? [];
 }
 
-async function saveTokens(tokens: Token[]): Promise<void> {
-  await setItem(STORAGE_KEYS.TOKENS, tokens);
+function updateTokens(change: (tokens: Token[]) => Token[]): Promise<Token[]> {
+  return updateItem<Token[]>(STORAGE_KEYS.TOKENS, (tokens) => change(tokens ?? []));
+}
+
+function sameToken(t: Token, chainId: number, address: string): boolean {
+  return t.chainId === chainId && t.address.toLowerCase() === address.toLowerCase();
 }
 
 // --- Public API ---
 
 /** Fetch on-chain symbol & decimals, then store the token. */
 export async function addToken(chainId: number, address: string): Promise<Token> {
+  const token = await fetchTokenInfo(chainId, address);
+  await saveToken(token);
+  return token;
+}
+
+/** Read a token's symbol / decimals / name from chain without storing it. */
+export async function fetchTokenInfo(chainId: number, address: string): Promise<Token> {
   const checksummed = getAddress(address);
   const client = await getClient(chainId);
 
@@ -26,7 +37,7 @@ export async function addToken(chainId: number, address: string): Promise<Token>
     client.readContract({ address: checksummed, abi: erc20Abi, functionName: 'name' }).catch(() => undefined),
   ]);
 
-  const token: Token = {
+  return {
     chainId,
     address: checksummed,
     symbol: symbol as string,
@@ -34,24 +45,23 @@ export async function addToken(chainId: number, address: string): Promise<Token>
     name: name as string | undefined,
     isCustom: true,
   };
+}
 
+/** Insert or replace a token in the user's list. */
+export async function saveToken(token: Token): Promise<void> {
+  await updateTokens((tokens) =>
+    tokens.some((t) => sameToken(t, token.chainId, token.address))
+      ? tokens.map((t) => (sameToken(t, token.chainId, token.address) ? token : t))
+      : [...tokens, token]);
+}
+
+export async function hasToken(chainId: number, address: string): Promise<boolean> {
   const tokens = await getTokens();
-  const idx = tokens.findIndex((t) => t.chainId === chainId && t.address.toLowerCase() === checksummed.toLowerCase());
-  if (idx >= 0) {
-    tokens[idx] = token;
-  } else {
-    tokens.push(token);
-  }
-  await saveTokens(tokens);
-  return token;
+  return tokens.some((t) => t.chainId === chainId && t.address.toLowerCase() === address.toLowerCase());
 }
 
 export async function removeToken(chainId: number, address: string): Promise<void> {
-  const tokens = await getTokens();
-  const filtered = tokens.filter(
-    (t) => !(t.chainId === chainId && t.address.toLowerCase() === address.toLowerCase()),
-  );
-  await saveTokens(filtered);
+  await updateTokens((tokens) => tokens.filter((t) => !sameToken(t, chainId, address)));
 }
 
 /** Get balance for a single ERC-20 token. */

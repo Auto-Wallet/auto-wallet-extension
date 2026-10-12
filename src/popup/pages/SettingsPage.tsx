@@ -4,6 +4,8 @@ import type { WalletSettings, ThemePreference } from '../../types/settings';
 import type { AccountSource, AccountType } from '../../lib/key-manager.core';
 import { SunIcon, MoonIcon, MonitorIcon, GlobeIcon, XIcon, GithubIcon } from '../icons';
 import { DeleteDangerModal } from '../DeleteDangerModal';
+import type { ConnectedSite } from '../../lib/connected-sites.core';
+import { BiometricSettingsCard } from '../BiometricSettingsCard';
 
 interface AccountInfo {
   id: string;
@@ -39,11 +41,26 @@ export function SettingsPage() {
   const [exportError, setExportError] = useState('');
   const [exportRevealed, setExportRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [sites, setSites] = useState<ConnectedSite[]>([]);
+  const [sitesError, setSitesError] = useState('');
 
   useEffect(() => {
     callBackground<WalletSettings>('getSettings').then(setSettings);
     callBackground<AccountInfo[]>('listAccounts').then(setAccounts);
+    callBackground<ConnectedSite[]>('getConnectedSites').then(setSites);
   }, []);
+
+  async function disconnect(origin: string) {
+    setSitesError('');
+    try {
+      await callBackground('disconnectSite', { origin });
+    } catch (e: any) {
+      console.error('[Auto-Wallet] Failed to disconnect site:', e);
+      setSitesError(e.message);
+      return;
+    }
+    setSites(await callBackground<ConnectedSite[]>('getConnectedSites'));
+  }
 
   async function updateSetting(patch: Partial<WalletSettings>) {
     const updated = await callBackground<WalletSettings>('saveSettings', patch);
@@ -139,6 +156,8 @@ export function SettingsPage() {
           ))}
         </div>
       </div>
+
+      <BiometricSettingsCard />
 
       {/* Auto-lock */}
       <div className="card">
@@ -312,6 +331,34 @@ export function SettingsPage() {
             <span className="toggle-knob" />
           </button>
         </div>
+      </div>
+
+      {/* Connected sites */}
+      <div className="card">
+        <p className="section-label" style={{ marginBottom: 10 }}>Connected Sites</p>
+        {sites.length === 0 ? (
+          <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>No site can see your address.</p>
+        ) : (
+          sites.map((site, i) => (
+            <React.Fragment key={site.origin}>
+              {i > 0 && <div className="settings-divider" />}
+              <div className="settings-row">
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p className="truncate mono" style={{ fontSize: 12, color: 'var(--text-primary)' }} title={site.origin}>
+                    {site.origin.replace(/^https:\/\//, '')}
+                  </p>
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    since {new Date(site.connectedAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <button onClick={() => disconnect(site.origin)} className="btn-ghost danger">
+                  Disconnect
+                </button>
+              </div>
+            </React.Fragment>
+          ))
+        )}
+        {sitesError && <p className="error-text">{sitesError}</p>}
       </div>
 
       {/* Encryption info */}

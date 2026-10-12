@@ -3,6 +3,8 @@ import {
   validateSigner,
   validateRpcUrl,
   parseAddChainParams,
+  parseChainIdHex,
+  parseSwitchChainParams,
   parseTxParams,
 } from '../src/lib/rpc-validation';
 
@@ -61,6 +63,22 @@ describe('validateRpcUrl', () => {
     const result = validateRpcUrl('http://insecure.example.com');
     expect(result.valid).toBe(false);
     expect(result.reason).toContain('HTTPS');
+  });
+
+  test('http://127.0.0.1 and http://[::1] → valid (dev)', () => {
+    expect(validateRpcUrl('http://127.0.0.1:8545')).toEqual({ valid: true });
+    expect(validateRpcUrl('http://[::1]:8545')).toEqual({ valid: true });
+  });
+
+  test('hosts that merely start with "localhost" → invalid', () => {
+    expect(validateRpcUrl('http://localhost.evil.com').valid).toBe(false);
+    expect(validateRpcUrl('http://localhost@evil.com').valid).toBe(false);
+    expect(validateRpcUrl('http://localhostevil.com:8545').valid).toBe(false);
+  });
+
+  test('unparseable URL → invalid', () => {
+    expect(validateRpcUrl('https://').valid).toBe(false);
+    expect(validateRpcUrl('not a url').valid).toBe(false);
   });
 
   test('ws:// → invalid', () => {
@@ -123,16 +141,76 @@ describe('parseAddChainParams', () => {
     expect(parseAddChainParams(params).chainId).toBe(42161);
   });
 
-  test('missing optional fields → defaults', () => {
-    const params = [{
-      chainId: '0x1',
-      chainName: 'Minimal',
-    }];
-    const result = parseAddChainParams(params);
-    expect(result.rpcUrl).toBe('');
-    expect(result.symbol).toBe('');
-    expect(result.decimals).toBe(18);
-    expect(result.blockExplorerUrl).toBeUndefined();
+  test('missing nativeCurrency → rejected instead of silently defaulting', () => {
+    const params = [{ chainId: '0x1', chainName: 'Minimal', rpcUrls: ['https://x.example'] }];
+    expect(() => parseAddChainParams(params)).toThrow(/nativeCurrency/);
+  });
+
+  test('missing rpcUrls → rejected', () => {
+    const params = [{ chainId: '0x1', chainName: 'Minimal', nativeCurrency: { name: 'E', symbol: 'ETH', decimals: 18 } }];
+    expect(() => parseAddChainParams(params)).toThrow(/rpcUrls/);
+  });
+
+  test('invalid chainId values → rejected', () => {
+    for (const chainId of ['1', '0x', '0xzz', '0x0', '0x01', 137, null, '0x20000000000000']) {
+      const params = [{ chainId, chainName: 'X', rpcUrls: ['https://x.example'], nativeCurrency: { name: 'E', symbol: 'ETH', decimals: 18 } }];
+      expect(() => parseAddChainParams(params)).toThrow();
+    }
+  });
+
+  test('blank or oversized chainName → rejected', () => {
+    for (const chainName of ['', '   ', 'x'.repeat(65), 42]) {
+      const params = [{ chainId: '0x1', chainName, rpcUrls: ['https://x.example'], nativeCurrency: { name: 'E', symbol: 'ETH', decimals: 18 } }];
+      expect(() => parseAddChainParams(params)).toThrow(/chainName/);
+    }
+  });
+
+  test('out-of-range decimals or bad symbol → rejected', () => {
+    const base = { chainId: '0x1', chainName: 'X', rpcUrls: ['https://x.example'] };
+    for (const nativeCurrency of [
+      { name: 'E', symbol: 'ETH', decimals: 37 },
+      { name: 'E', symbol: 'ETH', decimals: -1 },
+      { name: 'E', symbol: 'ETH', decimals: 1.5 },
+      { name: 'E', symbol: '', decimals: 18 },
+      { name: 'E', symbol: 'TOOLONGSYMBOL', decimals: 18 },
+    ]) {
+      expect(() => parseAddChainParams([{ ...base, nativeCurrency }])).toThrow();
+    }
+  });
+
+  test('rejected params carry EIP-1474 invalid-params code', () => {
+    try {
+      parseAddChainParams([{ chainId: 'nope' }]);
+      throw new Error('should have thrown');
+    } catch (e: any) {
+      expect(e.code).toBe(-32602);
+    }
+  });
+});
+
+describe('parseChainIdHex', () => {
+  test('accepts canonical hex chain ids', () => {
+    expect(parseChainIdHex('0x1')).toBe(1);
+    expect(parseChainIdHex('0xA4B1')).toBe(42161);
+    expect(parseChainIdHex('0x1fffffffffffff')).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  test('rejects malformed, zero, padded and oversized values', () => {
+    for (const v of ['', '0x', '1', '0x0', '0x01', '0xg1', ' 0x1', '0x20000000000000', 1, undefined, null, {}]) {
+      expect(() => parseChainIdHex(v)).toThrow();
+    }
+  });
+});
+
+describe('parseSwitchChainParams', () => {
+  test('reads chainId from the first param object', () => {
+    expect(parseSwitchChainParams([{ chainId: '0x89' }])).toBe(137);
+  });
+
+  test('rejects missing or malformed params', () => {
+    for (const params of [[], [null], ['0x1'], [{}], [{ chainId: 'abc' }]]) {
+      expect(() => parseSwitchChainParams(params as unknown[])).toThrow();
+    }
   });
 });
 

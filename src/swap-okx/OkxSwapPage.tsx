@@ -26,7 +26,8 @@ import {
   type OkxToken,
 } from '../lib/okxDex';
 import type { Network } from '../types/network';
-import { compactAmount, minReceived } from './format';
+import { compactAmount, minReceived, trimAmount } from './format';
+import { approvalSteps } from '../lib/swap/approval';
 import { encodeFunctionData, erc20Abi, formatUnits, parseUnits, toHex } from 'viem';
 
 interface ActiveInfo {
@@ -481,32 +482,21 @@ export function OkxSwapPage() {
       const tokenAddr = from.tokenContractAddress as `0x${string}`;
       const chainId = selectedNetwork.chainId;
 
-      // USDT-style tokens revert when moving a non-zero allowance to a new
-      // non-zero value, so reset to 0 first — and wait for it to land before
-      // sending the real approve.
-      if (allowance !== null && allowance > 0n) {
-        const resetData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [spender, 0n] });
-        const resetHash = await callBackground<string>('submitTxViaConfirm', {
+      // Exact amount only; a short non-zero allowance is reset to 0 first
+      // (USDT-style tokens revert otherwise). Each step must be mined before
+      // the next — broadcasting alone leaves the on-chain allowance unchanged.
+      for (const value of approvalSteps(allowance, amountRaw)) {
+        const data = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [spender, value] });
+        const hash = await callBackground<string>('submitTxViaConfirm', {
           chainId,
-          origin: 'Auto Wallet Swap · OKX Approve(0)',
-          tx: { from: active.address, to: tokenAddr, data: resetData, value: '0x0' },
+          origin: value === 0n ? 'Auto Wallet Swap · OKX Approve(0)' : 'Auto Wallet Swap · OKX Approve',
+          tx: { from: active.address, to: tokenAddr, data, value: '0x0' },
         });
-        await callBackground('waitForReceipt', { chainId, hash: resetHash });
+        const receipt = await callBackground<{ status: string }>('waitForReceipt', { chainId, hash });
+        if (receipt.status !== 'success') {
+          throw new Error(value === 0n ? 'Resetting the allowance to 0 failed on-chain.' : 'Approval transaction failed on-chain.');
+        }
       }
-
-      // Approve exactly the amount this swap needs — no unlimited allowance left
-      // sitting on the token after the trade.
-      const approveData = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [spender, amountRaw] });
-      const approveHash = await callBackground<string>('submitTxViaConfirm', {
-        chainId,
-        origin: 'Auto Wallet Swap · OKX Approve',
-        tx: { from: active.address, to: tokenAddr, data: approveData, value: '0x0' },
-      });
-      // Only advance to Swap once the approve is actually mined — broadcasting
-      // alone leaves the on-chain allowance unchanged, which is what made the
-      // button flip back to "Approve".
-      const receipt = await callBackground<{ status: string }>('waitForReceipt', { chainId, hash: approveHash });
-      if (receipt.status !== 'success') throw new Error('Approval transaction failed on-chain.');
 
       setAllowance(amountRaw);
       setStage({ kind: 'idle' });

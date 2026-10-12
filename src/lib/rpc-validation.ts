@@ -2,6 +2,12 @@
 // Zero IO — fully testable with plain data.
 
 import { hexToBigInt } from 'viem';
+import { RpcError } from './rpc-error';
+
+/** EIP-1474 "invalid params". */
+function invalidParams(message: string): RpcError {
+  return new RpcError(message, -32602);
+}
 
 // --- Signer validation ---
 
@@ -22,13 +28,50 @@ export interface UrlValidation {
   reason?: string;
 }
 
-/** Validate that an RPC URL uses HTTPS (or localhost for dev). */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * Validate that an RPC URL uses HTTPS, or plain HTTP to a loopback host for
+ * local dev nodes. The URL is parsed so a host like `localhost.evil.com` or
+ * `localhost@evil.com` cannot pass as localhost.
+ */
 export function validateRpcUrl(url: string | undefined): UrlValidation {
   if (!url) return { valid: false, reason: 'No RPC URL provided' };
-  if (url.startsWith('https://') || url.startsWith('http://localhost')) {
-    return { valid: true };
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { valid: false, reason: 'RPC URL is not a valid URL' };
   }
+  if (parsed.protocol === 'https:' && parsed.hostname) return { valid: true };
+  if (parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname)) return { valid: true };
   return { valid: false, reason: 'Only HTTPS RPC URLs are allowed' };
+}
+
+// --- Chain id parsing ---
+
+/**
+ * Parse an EIP-695 chain id: a 0x-prefixed hex string with no leading zeros,
+ * greater than zero and within JS safe-integer range.
+ */
+export function parseChainIdHex(value: unknown): number {
+  if (typeof value !== 'string' || !/^0x[1-9a-fA-F][0-9a-fA-F]*$/.test(value)) {
+    throw invalidParams(`Invalid chainId ${JSON.stringify(value)}: expected a 0x-prefixed hex string without leading zeros`);
+  }
+  const big = BigInt(value);
+  if (big > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw invalidParams(`Invalid chainId ${value}: value is too large`);
+  }
+  return Number(big);
+}
+
+/** Parse wallet_switchEthereumChain params: `[{ chainId: '0x…' }]`. */
+export function parseSwitchChainParams(params: unknown[]): number {
+  const p = params[0];
+  if (!p || typeof p !== 'object') {
+    throw invalidParams('wallet_switchEthereumChain expects [{ chainId }]');
+  }
+  return parseChainIdHex((p as { chainId?: unknown }).chainId);
 }
 
 // --- AddEthereumChain parameter parsing ---
@@ -42,22 +85,63 @@ export interface ParsedAddChainParams {
   blockExplorerUrl?: string;
 }
 
-/** Parse and normalize wallet_addEthereumChain params. */
+const MAX_CHAIN_NAME_LENGTH = 64;
+const MAX_SYMBOL_LENGTH = 12;
+const MAX_DECIMALS = 36;
+
+/** Parse and validate wallet_addEthereumChain params (EIP-3085). */
 export function parseAddChainParams(params: unknown[]): ParsedAddChainParams {
   const p = params[0] as {
-    chainId: string;
-    chainName: string;
-    rpcUrls?: string[];
-    nativeCurrency?: { name: string; symbol: string; decimals: number };
-    blockExplorerUrls?: string[];
-  };
+    chainId?: unknown;
+    chainName?: unknown;
+    rpcUrls?: unknown;
+    nativeCurrency?: { name?: unknown; symbol?: unknown; decimals?: unknown };
+    blockExplorerUrls?: unknown;
+  } | undefined;
+  if (!p || typeof p !== 'object') {
+    throw invalidParams('wallet_addEthereumChain expects [{ chainId, chainName, rpcUrls, nativeCurrency }]');
+  }
+
+  const chainId = parseChainIdHex(p.chainId);
+
+  if (typeof p.chainName !== 'string' || !p.chainName.trim() || p.chainName.trim().length > MAX_CHAIN_NAME_LENGTH) {
+    throw invalidParams(`chainName must be a non-empty string of at most ${MAX_CHAIN_NAME_LENGTH} characters`);
+  }
+
+  if (!Array.isArray(p.rpcUrls) || p.rpcUrls.length === 0 || typeof p.rpcUrls[0] !== 'string') {
+    throw invalidParams('rpcUrls must be a non-empty array of URL strings');
+  }
+
+  const nc = p.nativeCurrency;
+  if (!nc || typeof nc !== 'object') {
+    throw invalidParams('nativeCurrency is required');
+  }
+  if (typeof nc.symbol !== 'string' || !nc.symbol.trim() || nc.symbol.trim().length > MAX_SYMBOL_LENGTH) {
+    throw invalidParams(`nativeCurrency.symbol must be 1-${MAX_SYMBOL_LENGTH} characters`);
+  }
+  if (typeof nc.decimals !== 'number' || !Number.isInteger(nc.decimals) || nc.decimals < 0 || nc.decimals > MAX_DECIMALS) {
+    throw invalidParams(`nativeCurrency.decimals must be an integer between 0 and ${MAX_DECIMALS}`);
+  }
+
+  let blockExplorerUrl: string | undefined;
+  if (p.blockExplorerUrls !== undefined && p.blockExplorerUrls !== null) {
+    if (!Array.isArray(p.blockExplorerUrls)) throw invalidParams('blockExplorerUrls must be an array');
+    const first = p.blockExplorerUrls[0];
+    if (first !== undefined) {
+      if (typeof first !== 'string' || !first.startsWith('https://')) {
+        throw invalidParams('blockExplorerUrls entries must be https URLs');
+      }
+      blockExplorerUrl = first;
+    }
+  }
+
   return {
-    chainId: parseInt(p.chainId, 16),
-    chainName: p.chainName,
-    rpcUrl: p.rpcUrls?.[0] ?? '',
-    symbol: p.nativeCurrency?.symbol ?? '',
-    decimals: p.nativeCurrency?.decimals ?? 18,
-    blockExplorerUrl: p.blockExplorerUrls?.[0],
+    chainId,
+    chainName: p.chainName.trim(),
+    rpcUrl: p.rpcUrls[0],
+    symbol: nc.symbol.trim(),
+    decimals: nc.decimals,
+    blockExplorerUrl,
   };
 }
 

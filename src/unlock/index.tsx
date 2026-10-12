@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../popup/styles.css';
+import { BiometricUnlockButton } from '../popup/BiometricUnlockButton';
 
 function UnlockPopup() {
   const [origin, setOrigin] = useState('');
@@ -29,15 +30,11 @@ function UnlockPopup() {
         },
         (response) => {
           if (response?.error) {
-            setError('Wrong password');
+            setError(typeof response.error === 'string' ? response.error : response.error.message);
             setLoading(false);
           } else {
             // Notify background that unlock succeeded
-            chrome.runtime.sendMessage({
-              source: 'auto-wallet',
-              type: 'unlock_response',
-              success: true,
-            });
+            notifyUnlocked();
           }
         },
       );
@@ -45,6 +42,14 @@ function UnlockPopup() {
       setError(e.message);
       setLoading(false);
     }
+  }
+
+  function notifyUnlocked() {
+    chrome.runtime.sendMessage({
+      source: 'auto-wallet',
+      type: 'unlock_response',
+      success: true,
+    });
   }
 
   function handleReject() {
@@ -88,6 +93,8 @@ function UnlockPopup() {
         />
 
         {error && <p className="error-text" style={{ textAlign: 'center' }}>{error}</p>}
+
+        <BiometricUnlockButton onUnlocked={notifyUnlocked} />
       </main>
 
       <footer className="confirm-footer">

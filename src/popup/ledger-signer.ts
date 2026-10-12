@@ -5,7 +5,7 @@
 // signature using viem, and ask background to broadcast. Background never
 // touches the device — WebHID is unavailable in MV3 service workers.
 
-import { serializeTransaction, type TransactionSerializable } from 'viem';
+import { parseUnits, serializeTransaction, type TransactionSerializable } from 'viem';
 import { callBackground } from './api';
 import { signTransaction as ledgerSignTransaction } from '../lib/ledger';
 import type { FeeOverride } from './FeeEditor';
@@ -46,6 +46,7 @@ interface TokenSendArgs {
   amount: string;
   tokenAddress: string;
   decimals: number;
+  symbol: string;
   fee: FeeOverride | null;
   derivationPath: string;
 }
@@ -98,8 +99,19 @@ export async function signLedgerSendTx(args: LedgerSendArgs): Promise<string> {
   const rawTx = buildSignedRawTx(prep.txJson, sig);
   const meta = {
     from: undefined as string | undefined, // background already knows from getActiveAccountInfo
-    to: args.to,
-    value: args.kind === 'native' ? prep.txJson.value : '0',
+    // `to`/`value` are the real tx fields; a token transfer's recipient and
+    // amount go in tokenTransfer so History can show them.
+    to: prep.txJson.to,
+    value: prep.txJson.value,
+    tokenTransfer: args.kind === 'token'
+      ? {
+          token: args.tokenAddress,
+          symbol: args.symbol,
+          decimals: args.decimals,
+          amount: parseUnits(args.amount, args.decimals).toString(),
+          recipient: args.to,
+        }
+      : undefined,
     data: prep.txJson.data,
     chainId: prep.txJson.chainId,
     origin: 'Auto Wallet',
