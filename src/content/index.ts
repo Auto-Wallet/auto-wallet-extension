@@ -1,7 +1,7 @@
 // Content script: bridge between inpage provider (MAIN world) and background service worker
 // Runs in ISOLATED world — can access both chrome.runtime and window messages
 
-import { MSG_SOURCE, type RpcResponse } from '../types/messages';
+import { MSG_SOURCE, genId, type RpcResponse } from '../types/messages';
 import { isProviderInjectionAllowed } from '../lib/injection-policy';
 import type { WalletSettings } from '../types/settings';
 
@@ -59,10 +59,40 @@ if (isProviderInjectionAllowed(window.location.href)) {
     try {
       chrome.runtime.onMessage.addListener((message) => {
         if (message?.source !== MSG_SOURCE) return;
-        if (message.type === 'event') {
-          window.postMessage(message, '*');
+        if (message.type !== 'event') return;
+        if (message.eventName === 'accountsChanged') {
+          forwardAccountsForThisOrigin();
+          return;
         }
+        window.postMessage(message, '*');
       });
     } catch { /* extension reloaded before listener registered */ }
+  }
+
+  // accountsChanged is broadcast to every tab without an address. Ask
+  // eth_accounts as this page, so the page only sees the account when its
+  // origin is connected.
+  function forwardAccountsForThisOrigin(): void {
+    if (!isExtensionAlive()) return;
+    const request = {
+      source: MSG_SOURCE,
+      id: genId(),
+      type: 'rpc_request',
+      method: 'eth_accounts',
+      params: [],
+      origin: window.location.origin,
+    };
+    try {
+      chrome.runtime.sendMessage(request, (response: RpcResponse) => {
+        if (chrome.runtime.lastError) return;
+        if (!response || response.error) return;
+        window.postMessage({
+          source: MSG_SOURCE,
+          type: 'event',
+          eventName: 'accountsChanged',
+          payload: response.result,
+        }, '*');
+      });
+    } catch { /* extension reloaded mid-flight */ }
   }
 }

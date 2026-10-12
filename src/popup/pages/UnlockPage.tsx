@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { callBackground } from '../api';
+import { BiometricUnlockButton } from '../BiometricUnlockButton';
 
 export function UnlockPage({ onUnlock }: { onUnlock: () => void }) {
   const [password, setPassword] = useState('');
@@ -14,7 +15,7 @@ export function UnlockPage({ onUnlock }: { onUnlock: () => void }) {
       await callBackground('unlock', { password });
       onUnlock();
     } catch (e: any) {
-      setError('Wrong password or corrupted data');
+      setError(e.message);
       setLoading(false);
     }
   };
@@ -38,6 +39,7 @@ export function UnlockPage({ onUnlock }: { onUnlock: () => void }) {
         <button onClick={handleUnlock} disabled={loading} className="btn-primary">
           {loading ? 'Unlocking...' : 'Unlock'}
         </button>
+        <BiometricUnlockButton onUnlocked={onUnlock} />
         <p className="hint">Press Enter to unlock</p>
       </div>
     </div>

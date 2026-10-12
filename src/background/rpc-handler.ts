@@ -2,8 +2,11 @@ import {
   toHex,
   hexToBigInt,
   serializeTransaction,
+  parseTransaction,
   hashDomain,
   hashStruct,
+  getTypesForEIP712Domain,
+  type TypedDataDomain,
   type TransactionSerializable,
   type PublicClient,
 } from 'viem';
@@ -22,13 +25,27 @@ import {
 import { requestUnlock } from './unlock-manager';
 import { notifySign } from '../lib/notify';
 import { pollTxReceipt } from './tx-poller';
-import { emitChainChanged } from './events';
+import { emitAccountsChanged, emitChainChanged } from './events';
 import { RpcError, userRejection } from '../lib/rpc-error';
-import { validateSigner, validateRpcUrl, parseAddChainParams, parseTxParams } from '../lib/rpc-validation';
+import {
+  validateSigner,
+  validateRpcUrl,
+  parseAddChainParams,
+  parseSwitchChainParams,
+  parseTxParams,
+} from '../lib/rpc-validation';
+import {
+  parseTypedDataRequest,
+  assertTypedDataChain,
+  parseWatchAssetParams,
+  isForegroundTab,
+} from '../lib/rpc-methods.core';
+import { isExtensionPageSender } from '../lib/sender-trust';
+import { isSiteConnected, connectSite, disconnectSite, getConnectedSites, siteOrigin } from '../lib/connected-sites';
 import { applyGasPolicy, clampEstimatedFees } from '../lib/gas';
 import { simulateTx, type SimulationPreview } from './bcs-simulation';
 import { preparePersonalSignParams, signPreparedPersonalMessage } from '../lib/signing';
-import { retryWithNextNonce } from '../lib/nonce';
+import { parseNonceInput, sendWithNonce } from '../lib/nonce';
 
 // --- Rate limiting for eth_requestAccounts ---
 let lastUnlockPromptTime = 0;
@@ -36,18 +53,57 @@ const UNLOCK_PROMPT_COOLDOWN_MS = 3000; // 3 seconds between unlock popups
 
 // --- RPC Method Router ---
 
+/** Methods a site may only call after the user connected it (eth_requestAccounts). */
+const NEEDS_CONNECTION = new Set([
+  'eth_sendTransaction',
+  'personal_sign',
+  'eth_signTypedData',
+  'eth_signTypedData_v3',
+  'eth_signTypedData_v4',
+  'wallet_switchEthereumChain',
+  'wallet_addEthereumChain',
+  'wallet_watchAsset',
+]);
+
+/** EIP-1193 4100: the site has not been authorized. */
+function unauthorized(): RpcError {
+  return new RpcError('This site is not connected to Auto Wallet. Call eth_requestAccounts first.', 4100);
+}
+
 export async function handleRpcMethod(
   method: string,
   params: unknown[],
   origin: string,
   sender: chrome.runtime.MessageSender,
 ): Promise<unknown> {
+  // Calls from our own pages (e.g. the Swap page via submitTxViaConfirm) carry
+  // a display label as origin, not a site, and need no site connection.
+  const internal = isExtensionPageSender(sender, chrome.runtime.id);
+
+  if (method === 'eth_sign') {
+    throw new RpcError(
+      'eth_sign is disabled: it signs a raw hash the user cannot read. Use personal_sign or eth_signTypedData_v4.',
+      4200,
+    );
+  }
+  if (!internal && NEEDS_CONNECTION.has(method) && !(await isSiteConnected(origin))) {
+    throw unauthorized();
+  }
+
   switch (method) {
     // --- Account methods ---
     case 'eth_requestAccounts':
-      return handleRequestAccounts(origin);
+      return handleRequestAccounts(origin, internal);
     case 'eth_accounts':
-      return handleAccounts();
+      return handleAccounts(origin, internal);
+
+    // --- Permissions (EIP-2255) ---
+    case 'wallet_requestPermissions':
+      return handleRequestPermissions(params, origin, internal);
+    case 'wallet_getPermissions':
+      return handleGetPermissions(origin, internal);
+    case 'wallet_revokePermissions':
+      return handleRevokePermissions(origin);
 
     // --- Chain methods ---
     case 'eth_chainId':
@@ -57,26 +113,26 @@ export async function handleRpcMethod(
       return String(await networkManager.getActiveChainId());
 
     case 'wallet_switchEthereumChain':
-      return handleSwitchChain(params);
+      return handleSwitchChain(params, sender, internal);
 
     case 'wallet_addEthereumChain':
-      return handleAddChain(params, origin);
+      return handleAddChain(params, origin, sender, internal);
 
     // --- Signing ---
     case 'eth_sendTransaction':
       return handleSendTransaction(params, origin);
 
     case 'personal_sign':
-    case 'eth_sign':
       return handlePersonalSign(params, origin);
 
     case 'eth_signTypedData_v4':
+    case 'eth_signTypedData_v3':
     case 'eth_signTypedData':
-      return handleSignTypedData(params, origin);
+      return handleSignTypedData(method, params, origin);
 
     // --- Token ---
     case 'wallet_watchAsset':
-      return handleWatchAsset(params);
+      return handleWatchAsset(params, origin);
 
     // --- Read-only RPC: forward to node ---
     default:
@@ -86,8 +142,9 @@ export async function handleRpcMethod(
 
 // --- Handlers ---
 
-async function handleAccounts(): Promise<string[]> {
+async function handleAccounts(origin: string, internal: boolean): Promise<string[]> {
   if (!(await keyManager.isUnlocked())) return [];
+  if (!internal && !(await isSiteConnected(origin))) return [];
   return [await keyManager.getAddress()];
 }
 
@@ -110,33 +167,115 @@ async function assertActiveAccountCanSign(): Promise<void> {
   }
 }
 
-async function handleRequestAccounts(origin: string): Promise<string[]> {
-  // If already unlocked, return accounts directly
-  if (await keyManager.isUnlocked()) return [await keyManager.getAddress()];
+async function handleRequestAccounts(origin: string, internal: boolean): Promise<string[]> {
+  if (!(await keyManager.isUnlocked())) {
+    // Check if wallet exists
+    const hasWallet = await keyManager.hasWallet();
+    if (!hasWallet) return [];
 
-  // Check if wallet exists
-  const hasWallet = await keyManager.hasWallet();
-  if (!hasWallet) return [];
+    // Rate limit: prevent malicious dApps from spamming unlock popups
+    const now = Date.now();
+    if (now - lastUnlockPromptTime < UNLOCK_PROMPT_COOLDOWN_MS) {
+      throw userRejection('Too many connection requests, please wait');
+    }
+    lastUnlockPromptTime = now;
 
-  // Rate limit: prevent malicious dApps from spamming unlock popups
-  const now = Date.now();
-  if (now - lastUnlockPromptTime < UNLOCK_PROMPT_COOLDOWN_MS) {
-    throw userRejection('Too many connection requests, please wait');
+    // Wallet is locked — prompt user to unlock
+    const unlocked = await requestUnlock(origin);
+    if (!unlocked || !(await keyManager.isUnlocked())) {
+      throw userRejection('User rejected the connection request');
+    }
   }
-  lastUnlockPromptTime = now;
 
-  // Wallet is locked — prompt user to unlock
-  const unlocked = await requestUnlock(origin);
-  if (!unlocked || !(await keyManager.isUnlocked())) {
-    throw userRejection('User rejected the connection request');
+  if (!internal && !(await isSiteConnected(origin))) {
+    await requestConnection(origin);
   }
-
   return [await keyManager.getAddress()];
 }
 
-async function handleSwitchChain(params: unknown[]): Promise<null> {
-  const { chainId } = params[0] as { chainId: string };
-  const id = parseInt(chainId, 16);
+// One connect prompt per site at a time; repeat calls share its answer.
+const pendingConnections = new Map<string, Promise<void>>();
+
+function requestConnection(origin: string): Promise<void> {
+  const site = siteOrigin(origin);
+  if (!site) throw userRejection(`Cannot connect ${origin}: not a web site`);
+  const existing = pendingConnections.get(site);
+  if (existing) return existing;
+
+  const prompt = (async () => {
+    const info = await keyManager.getActiveAccountInfo();
+    const network = await networkManager.getActiveNetwork();
+    const { approved } = await requestUserConfirmation({
+      id: genId(),
+      method: 'eth_requestAccounts',
+      origin: site,
+      params: [],
+      signerAddress: info.address,
+      chainId: network.chainId,
+      chainName: network.name,
+      nativeSymbol: network.symbol,
+    });
+    if (!approved) throw userRejection('User rejected the connection request');
+    await connectSite(site);
+    // Other tabs of the same site re-query eth_accounts and see the account.
+    emitAccountsChanged();
+  })();
+  pendingConnections.set(site, prompt);
+  prompt.finally(() => pendingConnections.delete(site)).catch(() => undefined);
+  return prompt;
+}
+
+async function accountsPermission(origin: string, accounts: string[]) {
+  const site = siteOrigin(origin);
+  const record = (await getConnectedSites()).find((s) => s.origin === site);
+  return {
+    invoker: site ?? origin,
+    parentCapability: 'eth_accounts',
+    caveats: [{ type: 'restrictReturnedAccounts', value: accounts }],
+    date: record?.connectedAt ?? Date.now(),
+  };
+}
+
+async function handleRequestPermissions(params: unknown[], origin: string, internal: boolean): Promise<unknown[]> {
+  const requested = params[0] as Record<string, unknown> | undefined;
+  if (!requested || typeof requested !== 'object' || !('eth_accounts' in requested)) {
+    throw new RpcError('wallet_requestPermissions: only eth_accounts is supported', -32602);
+  }
+  const accounts = await handleRequestAccounts(origin, internal);
+  return [await accountsPermission(origin, accounts)];
+}
+
+async function handleGetPermissions(origin: string, internal: boolean): Promise<unknown[]> {
+  if (!internal && !(await isSiteConnected(origin))) return [];
+  return [await accountsPermission(origin, await handleAccounts(origin, internal))];
+}
+
+async function handleRevokePermissions(origin: string): Promise<null> {
+  await disconnectSite(origin);
+  emitAccountsChanged();
+  return null;
+}
+
+/** Make `chainId` active and tell dApps, unless it already is. */
+async function switchToChain(chainId: number): Promise<void> {
+  if ((await networkManager.getActiveChainId()) === chainId) return;
+  await networkManager.switchNetwork(chainId);
+  emitChainChanged(toHex(chainId));
+}
+
+/**
+ * Only the tab the user is looking at may change the wallet's network.
+ * Requests from background tabs are refused (not silently "succeeded"), so the
+ * dApp doesn't go on believing it is on the chain it asked for.
+ */
+function assertForeground(method: string, sender: chrome.runtime.MessageSender, internal: boolean): void {
+  if (internal || isForegroundTab(sender)) return;
+  throw userRejection(`Ignored ${method}: only the tab you are viewing can switch networks`);
+}
+
+async function handleSwitchChain(params: unknown[], sender: chrome.runtime.MessageSender, internal: boolean): Promise<null> {
+  const id = parseSwitchChainParams(params);
+  assertForeground('wallet_switchEthereumChain', sender, internal);
 
   // EIP-3326: signal "unrecognized chain" with code 4902 so dapps (wagmi/viem)
   // can fall back to wallet_addEthereumChain instead of treating it as a generic failure.
@@ -148,18 +287,23 @@ async function handleSwitchChain(params: unknown[]): Promise<null> {
     );
   }
 
-  await networkManager.switchNetwork(id);
-  emitChainChanged(chainId);
+  await switchToChain(id);
   return null;
 }
 
-async function handleAddChain(params: unknown[], origin: string): Promise<null> {
+async function handleAddChain(
+  params: unknown[],
+  origin: string,
+  sender: chrome.runtime.MessageSender,
+  internal: boolean,
+): Promise<null> {
   const parsed = parseAddChainParams(params);
+  assertForeground('wallet_addEthereumChain', sender, internal);
 
   // If chain already exists, just switch to it
   const all = await networkManager.getAllNetworks();
   if (all.find((n) => n.chainId === parsed.chainId)) {
-    await networkManager.switchNetwork(parsed.chainId);
+    await switchToChain(parsed.chainId);
     return null;
   }
 
@@ -194,8 +338,7 @@ async function handleAddChain(params: unknown[], origin: string): Promise<null> 
     blockExplorerUrl: parsed.blockExplorerUrl,
     isCustom: true,
   });
-  await networkManager.switchNetwork(parsed.chainId);
-  emitChainChanged(toHex(parsed.chainId));
+  await switchToChain(parsed.chainId);
   return null;
 }
 
@@ -334,6 +477,17 @@ async function buildLedgerTxJson(args: BuildLedgerTxArgs): Promise<SerializedTxJ
   };
 }
 
+/** dApp-supplied tx.nonce: a hex quantity within safe-integer range, or absent. */
+function parseDappNonce(raw: unknown): number | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]+$/.test(raw)) {
+    throw new RpcError(`Invalid transaction nonce ${JSON.stringify(raw)}`, -32602);
+  }
+  const n = hexToBigInt(raw as `0x${string}`);
+  if (n > BigInt(Number.MAX_SAFE_INTEGER)) throw new RpcError(`Transaction nonce ${raw} is too large`, -32602);
+  return Number(n);
+}
+
 async function handleSendTransaction(params: unknown[], origin: string): Promise<string> {
   await assertActiveAccountCanSign();
   const network = await networkManager.getActiveNetwork();
@@ -354,12 +508,14 @@ async function handleSendTransaction(params: unknown[], origin: string): Promise
   const txMaxFee = tx.maxFeePerGas ? hexToBigInt(tx.maxFeePerGas as `0x${string}`) : null;
   const txPriority = tx.maxPriorityFeePerGas ? hexToBigInt(tx.maxPriorityFeePerGas as `0x${string}`) : null;
   const txGasPrice = tx.gasPrice ? hexToBigInt(tx.gasPrice as `0x${string}`) : null;
+  // Parsed before the popup opens so a malformed value fails here, not after approval.
+  const dappNonce = parseDappNonce(tx.nonce);
 
   let ledgerCtx: LedgerConfirmContext | undefined;
   let preparedTxJson: SerializedTxJSON | undefined;
   if (ledger) {
     // Ledger: build a prepared tx so the confirm popup can sign + re-serialize.
-    const nonce = await publicClient.getTransactionCount({
+    const nonce = dappNonce ?? await publicClient.getTransactionCount({
       address: signerAddress as `0x${string}`,
       blockTag: 'pending',
     });
@@ -418,16 +574,14 @@ async function handleSendTransaction(params: unknown[], origin: string): Promise
       throw userRejection('Ledger did not return a signed transaction');
     }
     hash = await publicClient.sendRawTransaction({ serializedTransaction: signedRawTx });
-    // For logging, prefer fee values from the prepared tx (popup may have updated via feeOverride
-    // — but that override is already baked into the signed bytes; the prepared tx is the best
-    // estimate we have without re-parsing the raw tx).
-    if (preparedTxJson) {
-      effGas = BigInt(preparedTxJson.gas);
-      effMaxFee = preparedTxJson.maxFeePerGas ? BigInt(preparedTxJson.maxFeePerGas) : null;
-      effPriority = preparedTxJson.maxPriorityFeePerGas ? BigInt(preparedTxJson.maxPriorityFeePerGas) : null;
-      effGasPrice = preparedTxJson.gasPrice ? BigInt(preparedTxJson.gasPrice) : null;
-      effNonce = preparedTxJson.nonce;
-    }
+    // The popup may have changed fees or nonce before signing — log what was
+    // actually signed.
+    const signed = parseTransaction(signedRawTx);
+    effGas = signed.gas ?? finalGas;
+    effMaxFee = signed.maxFeePerGas ?? null;
+    effPriority = signed.maxPriorityFeePerGas ?? null;
+    effGasPrice = signed.gasPrice ?? null;
+    effNonce = signed.nonce ?? null;
   } else {
     const account = await keyManager.getAccount();
     const overrideGas = feeOverride?.gas ? BigInt(feeOverride.gas) : null;
@@ -441,9 +595,11 @@ async function handleSendTransaction(params: unknown[], origin: string): Promise
 
     const client = await networkManager.getWalletClient(account);
     const chain = networkManager.buildViemChain(network);
-    const requestedNonce = tx.nonce ? Number(hexToBigInt(tx.nonce as `0x${string}`)) : null;
-    hash = await retryWithNextNonce(async (nonceOverride) => {
-      const nonce = requestedNonce ?? nonceOverride ?? await publicClient.getTransactionCount({
+    // Nonce priority: what the user typed in the popup > what the dApp asked
+    // for > automatic. A chosen nonce is sent as-is (no silent retry).
+    const fixedNonce = parseNonceInput(feeOverride?.nonce) ?? dappNonce;
+    hash = await sendWithNonce(fixedNonce, async (nonceOverride) => {
+      const nonce = nonceOverride ?? await publicClient.getTransactionCount({
         address: account.address,
         blockTag: 'pending',
       });
@@ -530,27 +686,33 @@ async function handlePersonalSign(params: unknown[], origin: string): Promise<st
   return sig;
 }
 
-async function handleSignTypedData(params: unknown[], origin: string): Promise<string> {
+async function handleSignTypedData(method: string, params: unknown[], origin: string): Promise<string> {
   await assertActiveAccountCanSign();
   const ledger = await getLedgerContextOrNull();
   const network = await networkManager.getActiveNetwork();
   const chainId = network.chainId;
   const signerAddress = ledger ? ledger.address : (await keyManager.getAccount()).address;
 
+  const { address, typedData } = parseTypedDataRequest(method, params);
   // SECURITY: Validate requested address matches active account
-  validateSigner(params[0] as string | undefined, signerAddress);
-
-  const typedData = typeof params[1] === 'string' ? JSON.parse(params[1]) : params[1];
+  validateSigner(address, signerAddress);
+  // SECURITY: the popup labels the request with the active chain, so typed
+  // data for any other chain is refused.
+  assertTypedDataChain(typedData, chainId);
 
   let ledgerCtx: LedgerConfirmContext | undefined;
   if (ledger) {
     // Compute the EIP-712 hashes here so the popup can use the
     // hashed-message variant (compatible with all Ledger Eth-app versions).
+    // Same domain-type derivation viem's signTypedData uses when the dApp
+    // omits EIP712Domain, so Ledger and software keys sign the same hash.
+    const domain = typedData.domain as TypedDataDomain;
+    // Typed data arrives as untyped JSON, so viem's generic inference can't help here.
     const domainSeparator = hashDomain({
-      domain: typedData.domain,
-      types: { EIP712Domain: typedData.types.EIP712Domain },
-    });
-    const { EIP712Domain: _omit, ...nonDomainTypes } = typedData.types ?? {};
+      domain,
+      types: { EIP712Domain: typedData.types.EIP712Domain ?? getTypesForEIP712Domain({ domain }) },
+    } as Parameters<typeof hashDomain>[0]);
+    const { EIP712Domain: _omit, ...nonDomainTypes } = typedData.types;
     const messageStructHash = hashStruct({
       data: typedData.message,
       primaryType: typedData.primaryType,
@@ -566,7 +728,7 @@ async function handleSignTypedData(params: unknown[], origin: string): Promise<s
   const { autoSignResult, signature } = await checkWhitelistOrConfirm(
     'eth_signTypedData_v4',
     origin,
-    params,
+    [address, typedData],
     { to: null, data: null, value: '0', gasLimit: null, chainId },
     signerAddress,
     ledgerCtx,
@@ -581,18 +743,38 @@ async function handleSignTypedData(params: unknown[], origin: string): Promise<s
     sig = signature;
   } else {
     const account = await keyManager.getAccount();
-    sig = await account.signTypedData(typedData);
+    sig = await account.signTypedData(typedData as any);
   }
   notifySign('eth_signTypedData_v4', origin, autoSignResult.allowed);
   return sig;
 }
 
-
-async function handleWatchAsset(params: unknown[]): Promise<boolean> {
-  const p = params[0] as { type: string; options: { address: string; symbol?: string; decimals?: number } };
-  if (p.type !== 'ERC20') throw new Error('Only ERC20 tokens are supported');
+async function handleWatchAsset(params: unknown, origin: string): Promise<boolean> {
+  const request = parseWatchAssetParams(params);
   const network = await networkManager.getActiveNetwork();
-  await tokenManager.addToken(network.chainId, p.options.address);
+  if (await tokenManager.hasToken(network.chainId, request.address)) return true;
+
+  // Show what the chain says, not what the site claims: a site could pass a
+  // fake symbol like "USDC" for a scam token.
+  const token = await tokenManager.fetchTokenInfo(network.chainId, request.address);
+  const { approved } = await requestUserConfirmation({
+    id: genId(),
+    method: 'wallet_watchAsset',
+    origin,
+    params: [{
+      address: token.address,
+      symbol: token.symbol,
+      decimals: token.decimals,
+      name: token.name,
+      requestedSymbol: request.symbol,
+      requestedDecimals: request.decimals,
+    }],
+    chainId: network.chainId,
+    chainName: network.name,
+    nativeSymbol: network.symbol,
+  });
+  if (!approved) throw userRejection('User rejected adding the token');
+  await tokenManager.saveToken(token);
   return true;
 }
 

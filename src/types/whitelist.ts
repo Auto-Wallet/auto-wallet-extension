@@ -12,6 +12,9 @@ export interface WhitelistRule {
   // Metadata
   chainId: number | null;      // null = any chain
   createdAt: number;
+  // Epoch ms after which the rule stops auto-signing. null / missing = no
+  // expiry (rules created before this field existed keep that behavior).
+  expiresAt?: number | null;
 }
 
 export interface AutoSignResult {

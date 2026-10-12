@@ -24,6 +24,7 @@ export function AccountMenu({ onSwitch, onClose, onSettings }: { onSwitch: () =>
   const [label, setLabel] = useState('');
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
+  const [switchError, setSwitchError] = useState('');
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
@@ -44,7 +45,15 @@ export function AccountMenu({ onSwitch, onClose, onSettings }: { onSwitch: () =>
   }
 
   async function switchTo(id: string) {
-    await callBackground('switchAccount', { accountId: id });
+    setSwitchError('');
+    try {
+      await callBackground('switchAccount', { accountId: id });
+    } catch (e: any) {
+      // e.g. an account still encrypted under an older password.
+      console.error('[Auto-Wallet] Failed to switch account:', e);
+      setSwitchError(e.message);
+      return;
+    }
     onSwitch();
   }
 
@@ -232,6 +241,7 @@ export function AccountMenu({ onSwitch, onClose, onSettings }: { onSwitch: () =>
             <p className="account-menu-empty">No matching accounts</p>
           )}
         </div>
+        {switchError && <p className="error-text" style={{ padding: '0 4px' }}>{switchError}</p>}
       </div>
 
       {/* Add account */}

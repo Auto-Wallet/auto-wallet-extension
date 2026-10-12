@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { MSG_SOURCE, genId } from '../types/messages';
 import type { FeeSuggestions } from '../background/popup-handler';
+import { callBackground } from './api';
+import { parseNonceInput } from '../lib/nonce';
 
 // User-edited values flow back as decimal-wei strings.
 export interface FeeOverride {
@@ -9,6 +11,18 @@ export interface FeeOverride {
   maxFeePerGas: string | null;
   maxPriorityFeePerGas: string | null;
   gasPrice: string | null;
+  /** Decimal nonce the user typed; null = let the wallet pick the next one. */
+  nonce: string | null;
+}
+
+/** Which account/chain the nonce belongs to, and how it may be edited. */
+export interface NonceOptions {
+  address: string;
+  chainId: number;
+  /** Nonce fixed by the request (dApp-supplied, or a replacement's original). */
+  prefill?: number;
+  /** Speed-up / cancel must keep the original nonce: shown, not editable. */
+  locked?: boolean;
 }
 
 export interface FeeEditorRequest {
@@ -164,10 +178,11 @@ interface FeeEditorProps {
     gasPrice?: string;
   };
   defaultOpen?: boolean;
+  nonce?: NonceOptions;
   onChange: (override: FeeOverride | null) => void;
 }
 
-export function FeeEditor({ request, prefill, defaultOpen = false, onChange }: FeeEditorProps) {
+export function FeeEditor({ request, prefill, defaultOpen = false, nonce, onChange }: FeeEditorProps) {
   const [fees, setFees] = useState<FeeSuggestions | null>(null);
   const [feesError, setFeesError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(!defaultOpen);
@@ -176,6 +191,46 @@ export function FeeEditor({ request, prefill, defaultOpen = false, onChange }: F
   const [maxFeeInput, setMaxFeeInput] = useState('');
   const [priorityInput, setPriorityInput] = useState('');
   const [gasPriceInput, setGasPriceInput] = useState('');
+
+  // Nonce: the chain's next (pending) nonce, and what the user typed.
+  const [pendingNonce, setPendingNonce] = useState<number | null>(null);
+  const [nonceInput, setNonceInput] = useState('');
+  const [nonceLoadError, setNonceLoadError] = useState<string | null>(null);
+  const nonceAddress = nonce?.address;
+  const nonceChainId = nonce?.chainId;
+  const noncePrefill = nonce?.prefill;
+
+  useEffect(() => {
+    if (!nonceAddress || nonceChainId === undefined) return;
+    let cancelled = false;
+    setNonceLoadError(null);
+    callBackground<{ latest: number; pending: number }>('getNonceSuggestion', { address: nonceAddress, chainId: nonceChainId })
+      .then((n) => {
+        if (cancelled) return;
+        setPendingNonce(n.pending);
+        setNonceInput(String(noncePrefill ?? n.pending));
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        setNonceLoadError(e?.message ?? 'Failed to load nonce');
+        if (noncePrefill !== undefined) setNonceInput(String(noncePrefill));
+      });
+    return () => { cancelled = true; };
+  }, [nonceAddress, nonceChainId, noncePrefill]);
+
+  const nonceError = useMemo(() => {
+    try { parseNonceInput(nonceInput); return null; } catch (e: any) { return e.message as string; }
+  }, [nonceInput]);
+
+  // Only send a nonce when it differs from what the wallet would pick anyway,
+  // so an untouched form keeps the automatic next-nonce retry.
+  const nonceOverride = useMemo<string | null>(() => {
+    if (!nonce || nonce.locked) return null;
+    const typed = nonceInput.trim();
+    if (!typed) return null;
+    if (nonce.prefill === undefined && pendingNonce !== null && typed === String(pendingNonce)) return null;
+    return typed;
+  }, [nonce, nonceInput, pendingNonce]);
 
   // Fetch suggestions whenever the request changes
   useEffect(() => {
@@ -236,6 +291,7 @@ export function FeeEditor({ request, prefill, defaultOpen = false, onChange }: F
         maxFeePerGas: gweiInputToWei(maxFeeInput),
         maxPriorityFeePerGas: gweiInputToWei(priorityInput),
         gasPrice: null,
+        nonce: nonceOverride,
       });
     } else {
       onChange({
@@ -244,9 +300,10 @@ export function FeeEditor({ request, prefill, defaultOpen = false, onChange }: F
         maxFeePerGas: null,
         maxPriorityFeePerGas: null,
         gasPrice: gweiInputToWei(gasPriceInput),
+        nonce: nonceOverride,
       });
     }
-  }, [fees, gasInput, maxFeeInput, priorityInput, gasPriceInput]);
+  }, [fees, gasInput, maxFeeInput, priorityInput, gasPriceInput, nonceOverride]);
 
   const feePreview = useMemo(() => {
     if (!fees) return null;
@@ -290,6 +347,17 @@ export function FeeEditor({ request, prefill, defaultOpen = false, onChange }: F
           <span style={{ marginLeft: 6, color: 'var(--text-muted)' }}>{collapsed ? '▾' : '▴'}</span>
         </span>
       </button>
+
+      {nonce && (
+        <div className="row row-between" style={{ marginTop: 6 }}>
+          <span className="confirm-label" style={{ marginBottom: 0 }}>Nonce</span>
+          <span className="confirm-value mono" style={{ fontSize: 10 }}>
+            {nonceInput || (nonceLoadError ? '—' : 'loading...')}
+            {nonce.locked && <span style={{ marginLeft: 6, color: 'var(--text-muted)' }}>(fixed)</span>}
+            {!nonce.locked && nonceOverride !== null && <span style={{ marginLeft: 6, color: 'var(--warning)' }}>(custom)</span>}
+          </span>
+        </div>
+      )}
 
       {!collapsed && (
         <div style={{ marginTop: 10 }}>
@@ -343,6 +411,29 @@ export function FeeEditor({ request, prefill, defaultOpen = false, onChange }: F
               placeholder={fees?.gasPrice ? weiToGweiInput(fees.gasPrice) : '0'}
               onChange={setGasPriceInput}
             />
+          )}
+
+          {nonce && (
+            <div className="confirm-field">
+              <span className="confirm-label">Nonce</span>
+              <input
+                className="input-field"
+                inputMode="numeric"
+                value={nonceInput}
+                disabled={nonce.locked}
+                onChange={(e) => setNonceInput(e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder={pendingNonce !== null ? String(pendingNonce) : 'auto'}
+              />
+              {nonce.locked ? (
+                <p className="simulation-note">Replacements must reuse the original nonce.</p>
+              ) : (
+                <p className="simulation-note">
+                  Next nonce: {pendingNonce ?? '…'}. A lower nonce replaces a pending tx; a higher one waits for the gap to fill.
+                </p>
+              )}
+              {nonceLoadError && <p className="error-text">Couldn't load the next nonce: {nonceLoadError}</p>}
+              {nonceError && <p className="error-text">{nonceError}</p>}
+            </div>
           )}
         </div>
       )}

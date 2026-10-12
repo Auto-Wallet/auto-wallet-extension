@@ -71,11 +71,10 @@ class AutoWalletProvider {
             this._accounts = event.data.result as string[];
           } else if (method === 'eth_chainId') {
             this._chainId = event.data.result as string;
-          } else if (method === 'wallet_switchEthereumChain') {
-            const p = params[0] as { chainId: string };
-            this._chainId = p.chainId;
-            this._emit('chainChanged', p.chainId);
           }
+          // wallet_switchEthereumChain: no local chainChanged here — the
+          // background broadcasts it to every tab (this one included) once
+          // the switch really happened.
           resolve(event.data.result);
         }
       };

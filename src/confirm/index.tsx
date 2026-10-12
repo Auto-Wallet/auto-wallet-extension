@@ -23,7 +23,35 @@ import { callBackground } from '../popup/api';
 import type { Network } from '../types/network';
 import { findNetwork } from '../lib/network-manager.core';
 import { STORAGE_KEYS } from '../lib/storage';
+import { parseNonceInput } from '../lib/nonce';
+import { TRUST_DURATIONS_MS } from '../lib/whitelist.core';
 import '../popup/styles.css';
+
+/** Requests "Trust this site" can apply to (mirrors confirm-manager). */
+const TRUSTABLE_METHODS = new Set(['eth_sendTransaction', 'personal_sign', 'eth_signTypedData_v4']);
+const DEFAULT_TRUST_MS = 60 * 60 * 1000;
+
+function trustDurationLabel(ms: number): string {
+  const minutes = ms / 60_000;
+  return minutes < 60 ? `${minutes} min` : `${minutes / 60} hour${minutes === 60 ? '' : 's'}`;
+}
+
+type ConfirmAck = { ok: true } | { ok: false; error: string } | undefined;
+
+/** Send the popup's answer; resolves with the background's acknowledgement. */
+function sendConfirmResponse(message: Record<string, unknown>): Promise<ConfirmAck> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ source: MSG_SOURCE, type: 'confirm_response', ...message }, (ack: ConfirmAck) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message ?? 'unreachable' });
+        return;
+      }
+      resolve(ack);
+    });
+  });
+}
+
+const EXPIRED_MESSAGE = 'This request has expired (the wallet restarted or locked). Close this window and try again from the site.';
 
 interface LedgerCtx {
   derivationPath: string;
@@ -76,6 +104,7 @@ interface PendingRequest {
   ledger?: LedgerCtx;
   simulation?: SimulationPreview;
   simulationPending?: boolean;
+  lockNonce?: boolean;
 }
 
 function prettyTypedData(value: unknown): string {
@@ -224,7 +253,8 @@ function SimulationChanges({
 
 function ConfirmPage() {
   const [request, setRequest] = useState<PendingRequest | null>(null);
-  const [addToWhitelist, setAddToWhitelist] = useState(false);
+  // null = "Trust this site" off; otherwise how long auto-sign stays on.
+  const [trustDurationMs, setTrustDurationMs] = useState<number | null>(null);
   const [feeOverride, setFeeOverride] = useState<FeeOverride | null>(null);
   const [busy, setBusy] = useState(false);
   const [busyMsg, setBusyMsg] = useState('');
@@ -329,6 +359,8 @@ function ConfirmPage() {
     if (!fee) return json;
     const next: SerializedTxJSON = { ...json };
     if (fee.gas) next.gas = fee.gas;
+    const nonce = parseNonceInput(fee.nonce);
+    if (nonce !== null) next.nonce = nonce;
     if (fee.type === 'eip1559') {
       next.type = 'eip1559';
       if (fee.maxFeePerGas) next.maxFeePerGas = fee.maxFeePerGas;
@@ -343,9 +375,28 @@ function ConfirmPage() {
     return next;
   }
 
+  /** Close on success; keep the window open with an explanation if the request is gone. */
+  function finish(ack: ConfirmAck) {
+    if (ack && !ack.ok) {
+      setError(EXPIRED_MESSAGE);
+      setBusy(false);
+      setBusyMsg('');
+      return;
+    }
+    window.close();
+  }
+
   async function approve() {
     setError('');
     const ledger = request?.ledger;
+    if (request?.method === 'eth_sendTransaction') {
+      try {
+        parseNonceInput(feeOverride?.nonce);
+      } catch (e: any) {
+        setError(e.message);
+        return;
+      }
+    }
     if (!ledger) {
       let txDataOverride: `0x${string}` | null = null;
       try {
@@ -355,17 +406,15 @@ function ConfirmPage() {
         return;
       }
       // Software signing happens server-side
-      chrome.runtime.sendMessage({
-        source: MSG_SOURCE,
-        type: 'confirm_response',
+      setBusy(true);
+      const ack = await sendConfirmResponse({
         requestId: request?.id,
         approved: true,
-        addToWhitelist,
-        origin: request?.origin,
+        trustDurationMs: request && TRUSTABLE_METHODS.has(request.method) ? trustDurationMs : null,
         feeOverride: request?.method === 'eth_sendTransaction' ? feeOverride : null,
         txDataOverride,
       });
-      window.close();
+      finish(ack);
       return;
     }
 
@@ -402,18 +451,15 @@ function ConfirmPage() {
         throw new Error('Ledger context is missing required fields for this method');
       }
 
-      chrome.runtime.sendMessage({
-        source: MSG_SOURCE,
-        type: 'confirm_response',
+      const ack = await sendConfirmResponse({
         requestId: request!.id,
         approved: true,
-        addToWhitelist: false,    // ledger always requires user; whitelist is meaningless
-        origin: request!.origin,
+        trustDurationMs: null,    // ledger always requires the device; auto-sign can't apply
         txDataOverride: buildApprovalDataOverride(),
         signedRawTx,
         signature,
       });
-      window.close();
+      finish(ack);
     } catch (e: any) {
       setError(e?.message ?? String(e));
       setBusy(false);
@@ -421,13 +467,9 @@ function ConfirmPage() {
     }
   }
 
-  function reject() {
-    chrome.runtime.sendMessage({
-      source: MSG_SOURCE,
-      type: 'confirm_response',
-      requestId: request?.id,
-      approved: false,
-    });
+  async function reject() {
+    // Close either way: an expired request has nothing left to reject.
+    await sendConfirmResponse({ requestId: request?.id, approved: false });
     window.close();
   }
 
@@ -445,6 +487,16 @@ function ConfirmPage() {
   const isPersonalSign = request.method === 'personal_sign' || request.method === 'eth_sign';
   const isTypedData = request.method === 'eth_signTypedData_v4' || request.method === 'eth_signTypedData';
   const isAddChain = request.method === 'wallet_addEthereumChain';
+  const isConnect = request.method === 'eth_requestAccounts';
+  const isWatchAsset = request.method === 'wallet_watchAsset';
+  const canTrust = !isLedger && TRUSTABLE_METHODS.has(request.method);
+  const watchAsset = isWatchAsset ? request.params?.[0] as {
+    address: string; symbol: string; decimals: number; name?: string;
+    requestedSymbol?: string; requestedDecimals?: number;
+  } : null;
+  const title = isConnect ? 'Connect Site' : isWatchAsset ? 'Add Token' : 'Confirm Request';
+  const approveLabel = isConnect ? 'Connect' : isWatchAsset ? 'Add Token' : 'Approve';
+  const txNonce = isTransaction && typeof tx.nonce === 'string' ? Number(BigInt(tx.nonce)) : undefined;
 
   const value = tx.value ? (parseInt(tx.value, 16) / 1e18).toFixed(6) : '0';
   const nativeSymbol = request.nativeSymbol ?? 'ETH';
@@ -499,7 +551,7 @@ function ConfirmPage() {
         <img src="icons/icon48.png" alt="" style={{ width: 24, height: 24 }} />
         <span className="confirm-header-title">
           {isLedger && <LedgerBadge title="Ledger hardware wallet" />}
-          Confirm Request
+          {title}
         </span>
       </header>
 
@@ -661,6 +713,14 @@ function ConfirmPage() {
           <FeeEditor
             request={feeRequest}
             prefill={feePrefill}
+            nonce={request.signerAddress && request.chainId
+              ? {
+                  address: request.signerAddress,
+                  chainId: request.chainId,
+                  prefill: ledgerTxJson?.nonce ?? txNonce,
+                  locked: request.lockNonce,
+                }
+              : undefined}
             onChange={setFeeOverride}
           />
         )}
@@ -709,8 +769,55 @@ function ConfirmPage() {
           </div>
         )}
 
-        {/* Whitelist toggle (hidden for Ledger — auto-sign would be ineffective) */}
-        {!isLedger && (
+        {/* Connect request */}
+        {isConnect && (
+          <div className="card" style={{ padding: 12 }}>
+            <p style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+              <strong>{domain}</strong> wants to connect to your wallet.
+            </p>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.5 }}>
+              It will see your account address and can ask you to sign messages and transactions.
+              You can disconnect it at any time in Settings → Connected Sites.
+            </p>
+          </div>
+        )}
+
+        {/* Watch asset request */}
+        {watchAsset && (
+          <div className="card" style={{ padding: 12 }}>
+            <div className="confirm-row">
+              <div className="confirm-field">
+                <span className="confirm-label">Symbol (on-chain)</span>
+                <span className="confirm-value">{watchAsset.symbol}</span>
+              </div>
+              <div className="confirm-field" style={{ textAlign: 'right' }}>
+                <span className="confirm-label">Decimals</span>
+                <span className="confirm-value mono">{watchAsset.decimals}</span>
+              </div>
+            </div>
+            {watchAsset.name && (
+              <div className="confirm-field">
+                <span className="confirm-label">Name</span>
+                <span className="confirm-value">{watchAsset.name}</span>
+              </div>
+            )}
+            <div className="confirm-field" style={{ marginBottom: 0 }}>
+              <span className="confirm-label">Contract</span>
+              <span className="confirm-value mono" style={{ fontSize: 10, wordBreak: 'break-all' }}>{watchAsset.address}</span>
+            </div>
+            {((watchAsset.requestedSymbol !== undefined && watchAsset.requestedSymbol !== watchAsset.symbol)
+              || (watchAsset.requestedDecimals !== undefined && watchAsset.requestedDecimals !== watchAsset.decimals)) && (
+              <div className="confirm-warning" style={{ fontSize: 11, marginTop: 10 }}>
+                The site called this token "{watchAsset.requestedSymbol ?? watchAsset.symbol}"
+                {watchAsset.requestedDecimals !== undefined ? ` with ${watchAsset.requestedDecimals} decimals` : ''},
+                but the contract says "{watchAsset.symbol}" with {watchAsset.decimals}. The on-chain values are used.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* "Trust this site": time-limited auto-sign (hidden for Ledger — auto-sign would be ineffective) */}
+        {canTrust && (
           <div className="card" style={{ padding: 12 }}>
             <div className="settings-row" style={{ padding: 0 }}>
               <div style={{ flex: 1 }}>
@@ -718,16 +825,33 @@ function ConfirmPage() {
                   Trust this site
                 </p>
                 <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                  Auto-sign all future requests from <strong>{domain}</strong>
+                  Auto-sign requests from <strong>{domain}</strong> for a limited time
                 </p>
               </div>
               <button
-                onClick={() => setAddToWhitelist(!addToWhitelist)}
-                className={`toggle ${addToWhitelist ? 'on' : ''}`}
+                onClick={() => setTrustDurationMs(trustDurationMs === null ? DEFAULT_TRUST_MS : null)}
+                className={`toggle ${trustDurationMs !== null ? 'on' : ''}`}
+                aria-pressed={trustDurationMs !== null}
               >
                 <span className="toggle-knob" />
               </button>
             </div>
+            {trustDurationMs !== null && (
+              <div className="row gap-xs" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+                {TRUST_DURATIONS_MS.map((ms) => (
+                  <button
+                    key={ms}
+                    type="button"
+                    onClick={() => setTrustDurationMs(ms)}
+                    className={`theme-option ${trustDurationMs === ms ? 'active' : ''}`}
+                    aria-pressed={trustDurationMs === ms}
+                    style={{ flex: 1, minWidth: 60 }}
+                  >
+                    {trustDurationLabel(ms)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -738,10 +862,10 @@ function ConfirmPage() {
         )}
 
         {/* Warning */}
-        {!isLedger && (
+        {canTrust && (
           <div className="confirm-warning" style={{ fontSize: 11 }}>
-            {addToWhitelist
-              ? 'This domain will be added to your auto-sign whitelist.'
+            {trustDurationMs !== null
+              ? `Every transaction and signature from this site will be signed without asking for the next ${trustDurationLabel(trustDurationMs)}. Only do this for sites you fully trust.`
               : 'This request is not in your whitelist. Review carefully.'}
           </div>
         )}
@@ -758,7 +882,7 @@ function ConfirmPage() {
           Reject
         </button>
         <button onClick={approve} disabled={busy} className="btn-primary" style={{ flex: 1 }}>
-          {busy ? 'Signing…' : 'Approve'}
+          {busy ? 'Signing…' : approveLabel}
         </button>
       </footer>
 

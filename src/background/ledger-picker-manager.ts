@@ -1,4 +1,5 @@
 import { MSG_SOURCE, genId } from '../types/messages';
+import { isExtensionPageSender } from '../lib/sender-trust';
 
 interface LedgerPickerResult {
   selected: Array<{ address: string; derivationPath: string; label?: string }>;
@@ -43,8 +44,9 @@ export function openLedgerPickerWindow(): Promise<LedgerPickerResult> {
   });
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.source !== MSG_SOURCE || message.type !== 'ledger_picker_response') return false;
+  if (!isExtensionPageSender(sender, chrome.runtime.id, ['ledger-picker.html'])) return false;
 
   const pending = pendingPickers.get(message.requestId);
   if (!pending) return false;

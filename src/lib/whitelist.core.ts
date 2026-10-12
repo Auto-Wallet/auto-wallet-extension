@@ -77,12 +77,71 @@ export function checkSafetyCaps(
   return { ok: true };
 }
 
+/** True once `now` has reached the rule's expiry time. Rules without one never expire. */
+export function isRuleExpired(rule: WhitelistRule, now: number): boolean {
+  return rule.expiresAt !== undefined && rule.expiresAt !== null && now >= rule.expiresAt;
+}
+
+/** Choices offered by "Trust this site". There is deliberately no "forever". */
+export const TRUST_DURATIONS_MS: readonly number[] = [
+  15 * 60 * 1000,      // 15 min
+  60 * 60 * 1000,      // 1 hour
+  8 * 60 * 60 * 1000,  // 8 hours
+  24 * 60 * 60 * 1000, // 24 hours
+];
+
+/** Expiry choices for rules made by hand on the rules page. */
+export const MANUAL_RULE_EXPIRY_OPTIONS: readonly { label: string; ms: number | null }[] = [
+  { label: '15m', ms: 15 * 60 * 1000 },
+  { label: '1h', ms: 60 * 60 * 1000 },
+  { label: '8h', ms: 8 * 60 * 60 * 1000 },
+  { label: '24h', ms: 24 * 60 * 60 * 1000 },
+  { label: '7d', ms: 7 * 24 * 60 * 60 * 1000 },
+  { label: 'No expiry', ms: null },
+];
+
+/** Short text for how long a rule has left: "No expiry", "Expired", "1h 30m left". */
+export function expiryLabel(rule: WhitelistRule, now: number): string {
+  if (rule.expiresAt === undefined || rule.expiresAt === null) return 'No expiry';
+  if (isRuleExpired(rule, now)) return 'Expired';
+  const totalMin = Math.ceil((rule.expiresAt - now) / 60_000);
+  const days = Math.floor(totalMin / (24 * 60));
+  const hours = Math.floor((totalMin % (24 * 60)) / 60);
+  const mins = totalMin % 60;
+  let text: string;
+  if (days > 0) text = hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  else if (hours > 0) text = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  else text = `${mins}m`;
+  return `${text} left`;
+}
+
+/** Build the time-limited origin rule created by the confirm popup's "Trust this site". */
+export function buildTrustRule(origin: string, durationMs: number, now: number, id: string): WhitelistRule {
+  if (!TRUST_DURATIONS_MS.includes(durationMs)) {
+    throw new Error(`Unsupported trust duration: ${durationMs}`);
+  }
+  const domain = normalizeOrigin(origin);
+  return {
+    id,
+    label: `Trust: ${domain}`,
+    enabled: true,
+    origin: domain,
+    contractAddress: null,
+    methodSig: null,
+    maxValueEth: null,
+    maxGasLimit: null,
+    chainId: null,
+    createdAt: now,
+    expiresAt: now + durationMs,
+  };
+}
+
 /**
  * Evaluate all rules against a transaction context.
  * Pure function: rules in, decision out.
  */
-export function evaluateRules(rules: WhitelistRule[], ctx: TxContext): AutoSignResult {
-  const enabledRules = rules.filter((r) => r.enabled);
+export function evaluateRules(rules: WhitelistRule[], ctx: TxContext, now: number = Date.now()): AutoSignResult {
+  const enabledRules = rules.filter((r) => r.enabled && !isRuleExpired(r, now));
 
   for (const rule of enabledRules) {
     if (!matchesRule(rule, ctx)) continue;

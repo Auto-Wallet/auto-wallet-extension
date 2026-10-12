@@ -20,6 +20,16 @@ export interface TxLogEntry {
   replacementKind?: 'speedup' | 'cancel';
   prevHash?: string;
 
+  // ERC-20 transfer sent from the wallet's Send form. `to` is then the token
+  // contract and `value` the native value (0); this holds what moved.
+  tokenTransfer?: {
+    token: string;     // token contract
+    symbol: string;
+    decimals: number;
+    amount: string;    // raw units, decimal string
+    recipient: string;
+  };
+
   // Fee values requested at broadcast time (decimal strings)
   gasLimit?: string;             // gas units
   maxFeePerGas?: string;         // wei

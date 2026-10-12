@@ -1,24 +1,8 @@
 import { test, expect } from 'bun:test';
 import { createConfirmQueue } from '../src/background/confirm-queue';
 
-function installChromeMock() {
-  (globalThis as any).chrome = {
-    storage: {
-      session: {
-        get: async () => ({}),
-        set: async () => {},
-        remove: async () => {},
-      },
-      local: {
-        get: async () => ({}),
-        set: async () => {},
-        remove: async () => {},
-      },
-    },
-  };
-}
+import './helpers/fake-chrome';
 
-installChromeMock();
 const keyManager = await import('../src/lib/key-manager');
 
 test('lock drains pending confirmations so they cannot be signed later', async () => {

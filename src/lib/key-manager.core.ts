@@ -2,7 +2,7 @@
 // Zero IO, zero chrome dependency — fully testable.
 
 import { privateKeyToAccount, mnemonicToAccount, type PrivateKeyAccount } from 'viem/accounts';
-import type { EncryptedData } from './crypto';
+import type { EncryptedData, SealedData, VaultKdf } from './crypto';
 
 // --- Types (shared with key-manager.ts IO layer) ---
 
@@ -17,9 +17,36 @@ export interface StoredAccount {
   // Optional fields — undefined `type` means legacy 'private'.
   type?: AccountType;
   source?: AccountSource;
-  encrypted?: EncryptedData; // present for type === 'private'
+  // Private accounts hold their secret in exactly one of these:
+  sealed?: SealedData;       // v2: sealed with the vault key
+  encrypted?: EncryptedData; // v1 (legacy): own salt, keyed by the password
   derivationPath?: string;   // present for type === 'ledger'
 }
+
+/** v2 vault: how to re-derive the key, plus a blob that proves the password. */
+export interface VaultRecord {
+  version: 2;
+  kdf: VaultKdf;
+  verifier: SealedData;
+}
+
+/**
+ * Touch ID / Windows Hello unlock. The vault key is sealed with a key derived
+ * from the WebAuthn PRF secret of `credentialId` evaluated on `prfSalt`.
+ * The credential id and salt are not secret; the PRF secret never leaves the
+ * authenticator until the user passes the fingerprint check.
+ */
+export interface BiometricRecord {
+  version: 1;
+  credentialId: string; // base64url, as WebAuthn gives it
+  prfSalt: string;      // base64
+  sealedVaultKey: SealedData;
+  createdAt: number;
+}
+
+export type BiometricStatus =
+  | { enabled: false }
+  | { enabled: true; credentialId: string; prfSalt: string };
 
 export interface AccountInfo {
   id: string;
@@ -30,8 +57,9 @@ export interface AccountInfo {
   derivationPath?: string;
 }
 
+/** Kept in chrome.storage.session: the derived key bytes, never the password. */
 export interface SessionData {
-  masterPassword: string;
+  vaultKey: string; // base64 raw AES key
   activeAccountId: string;
   lastActivity: number;
 }

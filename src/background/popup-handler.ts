@@ -3,6 +3,7 @@ import * as networkManager from '../lib/network-manager';
 import * as whitelist from '../lib/whitelist';
 import * as tokenManager from '../lib/token-manager';
 import * as txLogger from '../lib/tx-logger';
+import * as connectedSites from '../lib/connected-sites';
 import { getClient } from '../lib/network-manager';
 import { handleRpcMethod } from './rpc-handler';
 import { getMulticall3Address } from '../lib/multicall';
@@ -20,7 +21,7 @@ import { emitAccountsChanged, emitChainChanged } from './events';
 import { toHex } from 'viem';
 import { applyGasPolicy, clampEstimatedFees, computeReplacementFees, resolveReplacementFees } from '../lib/gas';
 import { pollTxReceipt } from './tx-poller';
-import { retryWithNextNonce } from '../lib/nonce';
+import { parseNonceInput, sendWithNonce } from '../lib/nonce';
 import { openLedgerPickerWindow } from './ledger-picker-manager';
 
 /** Handle actions from the Popup UI. */
@@ -39,9 +40,23 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
       return keyManager.importMnemonic(payload.mnemonic, payload.password, payload.label);
     case 'unlock':
       return keyManager.unlock(payload.password);
+    case 'getBiometricStatus':
+      return keyManager.getBiometricStatus();
+    case 'enableBiometric':
+      return keyManager.enableBiometric(payload.password, {
+        credentialId: payload.credentialId,
+        prfSalt: payload.prfSalt,
+        prfOutput: payload.prfOutput,
+      });
+    case 'verifyPassword':
+      return keyManager.verifyPassword(payload.password);
+    case 'disableBiometric':
+      return keyManager.disableBiometric();
+    case 'unlockWithBiometric':
+      return keyManager.unlockWithBiometric(payload.prfOutput);
     case 'lock':
       await keyManager.lock();
-      emitAccountsChanged([]);
+      emitAccountsChanged();
       return true;
     case 'getAddress':
       return await keyManager.getAddress();
@@ -51,7 +66,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
       return keyManager.listAccounts();
     case 'switchAccount': {
       const newAddr = await keyManager.switchAccount(payload.accountId);
-      emitAccountsChanged([newAddr]);
+      emitAccountsChanged();
       return newAddr;
     }
     case 'renameAccount':
@@ -59,7 +74,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
     case 'removeAccount': {
       await keyManager.removeAccount(payload.accountId);
       const addr = await keyManager.getAddress();
-      emitAccountsChanged([addr]);
+      emitAccountsChanged();
       return true;
     }
     case 'getActiveAccountId':
@@ -74,34 +89,34 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
     // --- Add account (reuses master password) ---
     case 'addAccountGenerate': {
       const addr = await keyManager.addAccountGenerate(payload.label);
-      emitAccountsChanged([addr]);
+      emitAccountsChanged();
       return addr;
     }
     case 'addAccountPrivateKey': {
       const addr = await keyManager.addAccountPrivateKey(payload.privateKey, payload.label);
-      emitAccountsChanged([addr]);
+      emitAccountsChanged();
       return addr;
     }
     case 'addAccountMnemonic': {
       const addr = await keyManager.addAccountMnemonic(payload.mnemonic, payload.label);
-      emitAccountsChanged([addr]);
+      emitAccountsChanged();
       return addr;
     }
     case 'addWatchOnlyAccount': {
       const addr = await keyManager.addWatchOnlyAccount(payload.address, payload.label);
-      emitAccountsChanged([addr]);
+      emitAccountsChanged();
       return addr;
     }
 
     // --- Ledger ---
     case 'setupLedgerWallet': {
       const addr = await keyManager.setupLedgerWallet(payload.password, payload.seeds);
-      emitAccountsChanged([addr]);
+      emitAccountsChanged();
       return addr;
     }
     case 'addLedgerAccounts': {
       const addr = await keyManager.addLedgerAccounts(payload.seeds);
-      emitAccountsChanged([addr]);
+      emitAccountsChanged();
       return addr;
     }
     case 'pickLedgerAccounts':
@@ -117,6 +132,17 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
       const client = await getClient();
       const balance = await client.getBalance({ address: address as `0x${string}` });
       return formatEther(balance);
+    }
+    case 'getNonceSuggestion': {
+      // Confirm popups ask for the signer on the request's chain, which may
+      // differ from the active chain (e.g. speed-up of an older tx).
+      const address = payload.address as `0x${string}`;
+      const client = await getClient(Number(payload.chainId));
+      const [latest, pending] = await Promise.all([
+        client.getTransactionCount({ address, blockTag: 'latest' }),
+        client.getTransactionCount({ address, blockTag: 'pending' }),
+      ]);
+      return { latest, pending };
     }
     case 'getAccountNonces': {
       const address = await keyManager.getAddress();
@@ -137,6 +163,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
     // --- Send native token ---
     case 'sendNative': {
       await assertActiveCanSign();
+      const fixedNonce = parseNonceInput(payload.fee?.nonce);
       const account = await keyManager.getAccount();
       const network = await networkManager.getActiveNetwork();
       const publicClient = await getClient(network.chainId);
@@ -150,7 +177,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         { from: account.address, to: payload.to, value },
       );
       let usedNonce: number | undefined = undefined;
-      const hash = await retryWithNextNonce(async (nonceOverride) => {
+      const hash = await sendWithNonce(fixedNonce, async (nonceOverride) => {
         const nonce = nonceOverride ?? await publicClient.getTransactionCount({
           address: account.address,
           blockTag: 'pending',
@@ -188,6 +215,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
     // --- Send ERC-20 token ---
     case 'sendToken': {
       await assertActiveCanSign();
+      const fixedNonce = parseNonceInput(payload.fee?.nonce);
       const account = await keyManager.getAccount();
       const network = await networkManager.getActiveNetwork();
       const publicClient = await getClient(network.chainId);
@@ -206,7 +234,7 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         { from: account.address, to: payload.tokenAddress, data, value: 0n },
       );
       let usedNonce: number | undefined = undefined;
-      const hash = await retryWithNextNonce(async (nonceOverride) => {
+      const hash = await sendWithNonce(fixedNonce, async (nonceOverride) => {
         const nonce = nonceOverride ?? await publicClient.getTransactionCount({
           address: account.address,
           blockTag: 'pending',
@@ -228,8 +256,15 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
         timestamp: Date.now(),
         chainId: network.chainId,
         from: account.address,
-        to: payload.to,
-        value: String(amount),
+        to: payload.tokenAddress,
+        value: '0',
+        tokenTransfer: {
+          token: payload.tokenAddress,
+          symbol: payload.symbol,
+          decimals: payload.decimals,
+          amount: amount.toString(),
+          recipient: payload.to,
+        },
         hash,
         method: data.slice(0, 10),
         origin: 'Auto Wallet',
@@ -269,6 +304,16 @@ export async function handlePopupAction(action: string, payload: any): Promise<u
     }
 
     // --- Whitelist ---
+    case 'getConnectedSites':
+      return connectedSites.getConnectedSites();
+    case 'disconnectSite': {
+      const { origin } = payload as { origin: string };
+      await connectedSites.disconnectSite(origin);
+      // Tabs re-ask eth_accounts; the disconnected site now gets [].
+      emitAccountsChanged();
+      return true;
+    }
+
     case 'getRules':
       return whitelist.getRules();
     case 'addRule':
@@ -535,6 +580,7 @@ interface FeeOverrideInput {
   maxFeePerGas: string | null;
   maxPriorityFeePerGas: string | null;
   gasPrice: string | null;
+  nonce?: string | null;
 }
 
 function applyFeeOverride(fee: FeeOverrideInput | null | undefined): {
@@ -850,6 +896,7 @@ async function replacePendingTx(logId: string, kind: 'speedup' | 'cancel'): Prom
     chainName: network.name,
     nativeSymbol: network.symbol,
     ledger: ledgerCtx,
+    lockNonce: true,
   });
   if (!approved) throw new Error(`${kind === 'cancel' ? 'Cancel' : 'Speed up'} was rejected`);
 
@@ -988,7 +1035,7 @@ async function prepareLedgerSendTx(args: LedgerPrepArgs): Promise<{ unsignedHex:
     from: info.address, to: txTo, data, value,
   });
 
-  const nonce = await publicClient.getTransactionCount({
+  const nonce = parseNonceInput(args.fee?.nonce) ?? await publicClient.getTransactionCount({
     address: info.address as `0x${string}`,
     blockTag: 'pending',
   });
@@ -1086,6 +1133,7 @@ interface BroadcastArgs {
     maxFeePerGas?: string;
     maxPriorityFeePerGas?: string;
     gasPrice?: string;
+    tokenTransfer?: txLogger.TxLogEntry['tokenTransfer'];
   };
 }
 
@@ -1095,6 +1143,8 @@ async function broadcastSignedTx({ rawTx, meta }: BroadcastArgs): Promise<{ hash
   const publicClient = await getClient(meta.chainId ?? network.chainId);
 
   const hash = await publicClient.sendRawTransaction({ serializedTransaction: rawTx });
+  // Log what was actually signed.
+  const signed = parseTransaction(rawTx);
 
   const logId = genId();
   await txLogger.appendLog({
@@ -1104,6 +1154,8 @@ async function broadcastSignedTx({ rawTx, meta }: BroadcastArgs): Promise<{ hash
     from: info.address,
     to: meta.to,
     value: meta.value,
+    tokenTransfer: meta.tokenTransfer,
+    nonce: signed.nonce,
     hash,
     method: meta.methodSelector,
     origin: meta.origin ?? 'Auto Wallet',

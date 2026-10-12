@@ -243,9 +243,15 @@ export function HistoryPage() {
             // this account can actually replace it and returns a clear error if not.
             const manageable = entry.status === 'pending';
             const isZeroValue = !entry.value || entry.value === '0';
+            const transfer = entry.tokenTransfer;
+            // For a token send, the shown recipient is the token's receiver,
+            // not the token contract the tx was sent to.
+            const shownTo = transfer ? transfer.recipient : entry.to;
             // Contract deployments have no recipient (to is null in the raw tx).
             const headline = entry.replacementKind === 'cancel'
               ? 'Cancel transaction'
+              : transfer
+                ? `−${formatNative(transfer.amount, transfer.decimals)} ${transfer.symbol}`
               : !entry.to
                 ? 'Contract deployment'
                 : isZeroValue
@@ -274,13 +280,13 @@ export function HistoryPage() {
                 <div className="row row-between tx-card-main">
                   <div className="tx-card-summary">
                     <div className="tx-amount">{headline}</div>
-                    {entry.to && (
+                    {shownTo && (
                       <div className="tx-to">
-                        to <span className="mono">{shortAddr(entry.to)}</span>
+                        to <span className="mono">{shortAddr(shownTo)}</span>
                         <button
                           className="tx-copy-btn"
-                          onClick={() => copyAddress(entry.id, entry.to)}
-                          title={`Copy ${entry.to}`}
+                          onClick={() => copyAddress(entry.id, shownTo)}
+                          title={`Copy ${shownTo}`}
                           aria-label="Copy recipient address"
                         >
                           {copiedId === entry.id ? <CheckIcon size={11} /> : <CopyIcon size={11} />}
@@ -320,7 +326,9 @@ export function HistoryPage() {
 
                 {isOpen && (
                   <div className="rule-detail tx-details">
-                    {entry.to && <div className="truncate">to: {entry.to}</div>}
+                    {transfer && <div className="truncate">recipient: {transfer.recipient}</div>}
+                    {transfer && <div className="truncate">token: {transfer.token}</div>}
+                    {!transfer && entry.to && <div className="truncate">to: {entry.to}</div>}
                     {entry.hash && (
                       <div className="truncate">
                         {entry.replacementKind === 'cancel'

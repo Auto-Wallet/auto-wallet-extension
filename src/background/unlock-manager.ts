@@ -2,6 +2,7 @@
 
 import { MSG_SOURCE } from '../types/messages';
 import { createPopupWindow } from './window-utils';
+import { isExtensionPageSender } from '../lib/sender-trust';
 
 interface PendingUnlock {
   resolve: (unlocked: boolean) => void;
@@ -9,6 +10,11 @@ interface PendingUnlock {
 
 let pendingUnlock: PendingUnlock | null = null;
 let unlockWindowId: number | null = null;
+
+/** The unlock popup this worker opened, if any. */
+export function liveUnlockWindowId(): number | null {
+  return unlockWindowId;
+}
 
 /** Open an unlock popup and wait for user to enter password. Returns true if unlocked. */
 export function requestUnlock(origin: string): Promise<boolean> {
@@ -58,9 +64,10 @@ export function requestUnlock(origin: string): Promise<boolean> {
 }
 
 // Listen for unlock responses
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.source !== MSG_SOURCE) return;
   if (message.type !== 'unlock_response') return;
+  if (!isExtensionPageSender(sender, chrome.runtime.id, ['unlock.html'])) return;
 
   if (pendingUnlock) {
     const p = pendingUnlock;

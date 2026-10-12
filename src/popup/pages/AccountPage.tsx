@@ -6,6 +6,7 @@ import type { AddressBookEntry } from '../../types/address-book';
 import type { WalletSettings } from '../../types/settings';
 import { encodeFunctionData, erc20Abi, parseEther, parseUnits, toHex } from 'viem';
 import { FeeEditor, type FeeOverride, type FeeEditorRequest } from '../FeeEditor';
+import { parseNonceInput } from '../../lib/nonce';
 import { AccountBadge } from '../AccountBadge';
 import { signLedgerSendTx } from '../ledger-signer';
 import { matchAddressBookEntries, resolveAddressBookInput } from '../../lib/address-book.core';
@@ -319,6 +320,12 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
     }
     const amount = parseFloat(sendAmount);
     if (!sendAmount.trim() || isNaN(amount) || amount <= 0) { setSendError('Invalid amount'); return; }
+    try {
+      parseNonceInput(sendFee?.nonce);
+    } catch (e: any) {
+      setSendError(e.message);
+      return;
+    }
     setSending(true); setSendError(''); setSendSuccess('');
     try {
       let hash: string;
@@ -345,6 +352,7 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
             amount: sendAmount.trim(),
             tokenAddress: sendTarget.token.address,
             decimals: sendTarget.token.decimals,
+            symbol: sendTarget.token.symbol,
             fee: sendFee,
             derivationPath: active!.derivationPath!,
           });
@@ -354,6 +362,7 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
             amount: sendAmount.trim(),
             tokenAddress: sendTarget.token.address,
             decimals: sendTarget.token.decimals,
+            symbol: sendTarget.token.symbol,
             fee: sendFee,
           });
         }
@@ -580,7 +589,11 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
             </p>
           )}
           {feeRequest && (
-            <FeeEditor request={feeRequest} onChange={setSendFee} />
+            <FeeEditor
+              request={feeRequest}
+              nonce={address && network ? { address, chainId: network.chainId } : undefined}
+              onChange={setSendFee}
+            />
           )}
           {sendError && <p className="error-text">{sendError}</p>}
           {sendSuccess && (

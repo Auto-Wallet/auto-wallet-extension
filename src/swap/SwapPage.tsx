@@ -17,6 +17,7 @@ import {
   type QuoteSlot,
 } from '../lib/swap';
 import { TokenPicker, type PickerSelection } from './TokenPicker';
+import { approvalSteps } from '../lib/swap/approval';
 import { encodeFunctionData, erc20Abi, formatUnits, parseUnits, toHex } from 'viem';
 import type { Network } from '../types/network';
 
@@ -46,11 +47,6 @@ type SwapStage =
 const DEFAULT_SLIPPAGE = 0.01;
 const SLIPPAGE_OPTIONS = [0.005, 0.01, 0.03];
 
-// Max uint256 — used as the approve amount so the user only has to authorize
-// the spender once per source token. Quote-derived spenders may differ
-// slightly across requests, so an exact-amount approve would force a new
-// approval per quote.
-const MAX_UINT256 = (1n << 256n) - 1n;
 
 export function SwapPage() {
   const [active, setActive] = useState<ActiveInfo | null>(null);
@@ -292,36 +288,27 @@ export function SwapPage() {
     try {
       const tokenAddr = from.token.address as `0x${string}`;
       const spender = selectedQuote.approvalSpender as `0x${string}`;
+      const chainId = from.chain.chainId;
 
-      // USDT-style ERC20s require allowance to be reset to 0 before increasing
-      // to a new non-zero value.
-      if (allowance !== null && allowance > 0n) {
-        const resetData = encodeFunctionData({
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [spender, 0n],
+      // Exact amount only (no unlimited allowance left on the token). A short
+      // non-zero allowance is reset to 0 first — USDT-style tokens revert
+      // otherwise — and each approve must be mined before the next step.
+      const steps = approvalSteps(allowance, amountRaw);
+      for (const value of steps) {
+        const data = encodeFunctionData({ abi: erc20Abi, functionName: 'approve', args: [spender, value] });
+        const hash = await callBackground<string>('submitTxViaConfirm', {
+          chainId,
+          origin: value === 0n ? 'Auto Wallet Swap · Approve(0)' : 'Auto Wallet Swap · Approve',
+          tx: { from: active.address, to: tokenAddr, data, value: '0x0' },
         });
-        await callBackground<string>('submitTxViaConfirm', {
-          chainId: from.chain.chainId,
-          origin: 'Auto Wallet Swap · Approve(0)',
-          tx: { from: active.address, to: tokenAddr, data: resetData, value: '0x0' },
-        });
+        setStage({ kind: 'approving', allowanceTx: hash });
+        const receipt = await callBackground<{ status: string }>('waitForReceipt', { chainId, hash });
+        if (receipt.status !== 'success') {
+          throw new Error(value === 0n ? 'Resetting the allowance to 0 failed on-chain.' : 'Approval transaction failed on-chain.');
+        }
       }
-
-      const approveData = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [spender, MAX_UINT256],
-      });
-      const approveHash = await callBackground<string>('submitTxViaConfirm', {
-        chainId: from.chain.chainId,
-        origin: 'Auto Wallet Swap · Approve',
-        tx: { from: active.address, to: tokenAddr, data: approveData, value: '0x0' },
-      });
-      setStage({ kind: 'approving', allowanceTx: approveHash });
-      // Pessimistic refresh — the receipt may not be mined yet but we want to
-      // unblock the Swap button as soon as the user signs.
-      setAllowance(MAX_UINT256);
+      setAllowance(amountRaw);
+      setStage({ kind: 'idle' });
     } catch (e: any) {
       setStage({ kind: 'error', message: e?.message ?? 'Approve rejected' });
     }

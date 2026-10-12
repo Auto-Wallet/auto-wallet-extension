@@ -6,7 +6,7 @@ import { evaluateRules, type TxContext } from './whitelist.core';
 // Re-export core types and functions for backward compatibility
 export type { TxContext } from './whitelist.core';
 export type { AutoSignResult as AutoSignCheckResult } from '../types/whitelist';
-export { matchesRule, checkSafetyCaps, evaluateRules, normalizeOrigin } from './whitelist.core';
+export { matchesRule, checkSafetyCaps, evaluateRules, normalizeOrigin, isRuleExpired, buildTrustRule, TRUST_DURATIONS_MS, MANUAL_RULE_EXPIRY_OPTIONS, expiryLabel } from './whitelist.core';
 
 // --- Storage ---
 

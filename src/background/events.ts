@@ -17,8 +17,13 @@ function broadcast(eventName: string, payload: unknown): void {
   });
 }
 
-export function emitAccountsChanged(accounts: string[]): void {
-  broadcast('accountsChanged', accounts);
+/**
+ * Tell every tab the account state changed. The payload is deliberately empty:
+ * each tab's content script re-asks eth_accounts, so a tab only learns the
+ * address if its own origin is connected.
+ */
+export function emitAccountsChanged(): void {
+  broadcast('accountsChanged', null);
 }
 
 export function emitChainChanged(chainIdHex: string): void {
