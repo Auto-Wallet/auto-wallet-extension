@@ -55,9 +55,10 @@ jobs:
 
       - name: Build extension
         env:
+          RELAY_API_KEY: ${{ secrets.RELAY_API_KEY }}
           TENDERLY_ACCESS_TOKEN: ${{ secrets.TENDERLY_ACCESS_TOKEN }}
           TENDERLY_API_URL: ${{ secrets.TENDERLY_API_URL }}
-        run: bun run build
+        run: bun run build --require-relay-key
 
       - name: Package zip
         run: |

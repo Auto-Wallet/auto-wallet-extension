@@ -20,6 +20,11 @@ function readLocalEnv(): Record<string, string> {
 }
 
 const localEnv = readLocalEnv();
+// Bun loads .env and .env.local; an explicit CI environment value wins.
+const relayApiKey = Bun.env.RELAY_API_KEY === undefined ? '' : Bun.env.RELAY_API_KEY.trim();
+if (Bun.argv.includes('--require-relay-key') && relayApiKey === '') {
+  throw new Error('RELAY_API_KEY is required for release builds.');
+}
 
 // Clean and create dist
 if (existsSync(DIST)) rmSync(DIST, { recursive: true });
@@ -35,6 +40,9 @@ async function buildEntry(entry: string, outputName: string) {
     target: 'browser',
     minify: true,
     define: {
+      // Extension bundles can be unpacked. Keep the app key out of UI and
+      // web-accessible scripts; only the service worker calls Relay with it.
+      ...(outputName === 'background.js' ? { __RELAY_API_KEY__: JSON.stringify(relayApiKey) } : {}),
       __BCS_API_URL__: JSON.stringify(
         localEnv.BCS_API_URL
           ?? Bun.env.BCS_API_URL

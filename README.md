@@ -181,6 +181,23 @@ bun install
 bun run build
 ```
 
+Relay quotes require an app API key in the `x-api-key` header. See the
+[Relay API quickstart](https://docs.relay.link/references/api/quickstart).
+For local builds, copy `.env.example` to `.env.local`, set `RELAY_API_KEY`,
+then rebuild. Bun loads both `.env` and `.env.local`; explicit environment
+values take precedence. Keep real keys in ignored environment files.
+
+The release workflow uses the shared GitHub Actions secret `RELAY_API_KEY`
+and fails the build if it is empty. Local builds can run without a key,
+but Relay requests will report that it is not configured.
+
+Relay requests run in the extension service worker. Only this extension's
+own pages may call the request bridge, which accepts the chain, quote, and
+status endpoints and does not follow redirects. The key stays out of UI
+and web-accessible scripts, and responses and errors redact it. Anyone
+who unpacks the extension can still read the key in `background.js`;
+keeping it private would require a server proxy.
+
 ### Load in Chrome
 
 1. Open `chrome://extensions`
