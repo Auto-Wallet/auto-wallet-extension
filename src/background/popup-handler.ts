@@ -24,10 +24,13 @@ import { pollTxReceipt } from './tx-poller';
 import { supersededHashes } from '../lib/tx-resume.core';
 import { parseNonceInput, sendWithNonce } from '../lib/nonce';
 import { openLedgerPickerWindow } from './ledger-picker-manager';
+import { relayRequest } from './relay';
 
 /** Handle actions from the Popup UI. */
 export async function handlePopupAction(action: string, payload: any): Promise<unknown> {
   switch (action) {
+    case 'relayRequest':
+      return relayRequest(payload);
     // --- Wallet ---
     case 'hasWallet':
       return keyManager.hasWallet();

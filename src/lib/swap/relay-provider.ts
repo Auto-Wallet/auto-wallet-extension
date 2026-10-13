@@ -11,6 +11,7 @@
 // We extract everything we need from that response.
 
 import { decodeFunctionData, erc20Abi, formatUnits, parseUnits } from 'viem';
+import { callBackground } from '../../popup/api';
 import {
   isEvmChainId,
   isNativeAddress,
@@ -25,8 +26,6 @@ import {
   type StatusArgs,
   type SwapProvider,
 } from './types';
-
-const BASE = 'https://api.relay.link';
 
 // App-fee config: every quote request adds 0.1% in basis points to the
 // configured recipient. The user explicitly chose these settings.
@@ -123,23 +122,11 @@ interface RelayStatusResponse {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`Relay ${path} HTTP ${res.status}`);
-  return (await res.json()) as T;
+  return callBackground<T>('relayRequest', { method: 'GET', path });
 }
 
 async function postJson<T>(path: string, body: object): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    let detail = '';
-    try { detail = (await res.json())?.message ?? ''; } catch { /* body not JSON */ }
-    throw new Error(detail || `Relay ${path} HTTP ${res.status}`);
-  }
-  return (await res.json()) as T;
+  return callBackground<T>('relayRequest', { method: 'POST', path, body });
 }
 
 export class RelayProvider implements SwapProvider {
