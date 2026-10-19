@@ -69,7 +69,7 @@
 <main>
   <header>
     <h1>Auto Wallet — Privacy Policy</h1>
-    <p class="meta">Last updated: 2026-04-18</p>
+    <p class="meta">Last updated: 2026-10-12</p>
   </header>
 
   <p>
@@ -82,10 +82,12 @@
   <div class="card">
     <strong>Plain-language summary</strong>
     <ul>
-      <li>We do <strong>not</strong> collect, transmit, sell, or share any personal information.</li>
+      <li>We do <strong>not</strong> collect, sell, or share any personal information, and nothing is sent to us.</li>
       <li>We do <strong>not</strong> run any servers, accounts, analytics, or telemetry.</li>
       <li>Your private keys and mnemonics are encrypted with your password and stored only in your browser.</li>
-      <li>Network requests are sent directly from your browser to the public services you configure (RPC endpoints) or that are required to display token icons.</li>
+      <li>Some features send data straight from your browser to third-party services: blockchain RPC nodes, a transaction
+        simulation service, a price service, token icon hosting, and swap providers when you use Swap. Section 3 lists
+        each one and what it receives.</li>
     </ul>
   </div>
 
@@ -99,12 +101,17 @@
       <tr>
         <td>Wallet secrets</td>
         <td>Private keys, mnemonics (seed phrases)</td>
-        <td>Encrypted with AES-256-GCM (key derived from your password using PBKDF2, 600,000 iterations) and stored locally via <code>chrome.storage.local</code>. Never transmitted.</td>
+        <td>Encrypted with AES-256-GCM (key derived from your password using PBKDF2, 600,000 iterations) and stored locally via <code>chrome.storage.local</code>. Never transmitted. Your password itself is never stored.</td>
       </tr>
       <tr>
         <td>Wallet configuration</td>
-        <td>Account names and addresses, custom networks, custom tokens, whitelist (auto-sign) rules, transaction history records, settings such as auto-lock timeout</td>
+        <td>Account names and addresses, custom networks, custom tokens, whitelist (auto-sign) rules, the list of sites you connected, transaction history records, settings such as auto-lock timeout</td>
         <td>Stored locally via <code>chrome.storage.local</code>. Never transmitted.</td>
+      </tr>
+      <tr>
+        <td>Touch ID / Windows Hello unlock (optional, off by default)</td>
+        <td>A WebAuthn credential created on your device, and a second encrypted copy of the wallet key</td>
+        <td>Your fingerprint or face data never leaves your operating system; the Extension never sees it. The credential ID and the encrypted key copy are stored locally via <code>chrome.storage.local</code> and removed when you turn the feature off. Never transmitted.</td>
       </tr>
       <tr>
         <td>dApp interaction context</td>
@@ -126,30 +133,46 @@
 
   <h2>2. What We Do Not Do</h2>
   <ul>
-    <li>We do not collect, store, or transmit personal information, IP addresses, browsing history, or wallet addresses.</li>
+    <li>We do not receive, collect, or store personal information, IP addresses, browsing history, or wallet addresses. No data is sent to us.</li>
     <li>We do not operate any backend servers, databases, or accounts.</li>
     <li>We do not include analytics, telemetry, crash reporting, advertising, or tracking SDKs.</li>
-    <li>We do not sell or share data with third parties — there is no data to sell or share.</li>
+    <li>We do not sell data. The only data that leaves your browser is what the features in Section 3 send directly to those services.</li>
   </ul>
 
   <h2>3. Third-Party Services</h2>
   <p>
-    Because Auto Wallet is a wallet, it must communicate with blockchain networks. These requests go directly from your browser
-    to third parties that you have either configured yourself or that the Extension uses to show token icons. Their respective
-    privacy policies apply to those interactions.
+    Because Auto Wallet is a wallet, it must communicate with blockchain networks and a few supporting services. These
+    requests go directly from your browser to the services below; they never pass through us. Each service's own privacy
+    policy applies to the requests it receives, and each can see your IP address as part of a normal web request.
   </p>
   <ul>
     <li>
       <strong>RPC providers:</strong> The Extension ships with default public RPC URLs for several EVM chains (e.g.
-      <code>cloudflare-eth.com</code>, <code>polygon-rpc.com</code>, <code>arb1.arbitrum.io</code>,
-      <code>mainnet.optimism.io</code>, <code>bsc-dataseed.binance.org</code>, <code>api.avax.network</code>). You can
+      <code>eth.drpc.org</code>, <code>polygon.drpc.org</code>, <code>mainnet.base.org</code>,
+      <code>mainnet.optimism.io</code>, <code>bsc-dataseed.binance.org</code>, <code>gwan-ssl.wandevs.org</code>). You can
       change any of these or add your own networks. Whoever operates the RPC endpoint you choose can see the requests
-      your browser sends to them.
+      your browser sends to them, including your wallet address and the transactions you send.
+    </li>
+    <li>
+      <strong>Transaction simulation:</strong> When a dApp asks you to approve a transaction, the Extension sends the
+      transaction (chain ID, from and to addresses, value, call data, gas limit) to
+      <code>balance-change-simulate-api.wanscan.org</code> to preview the balance changes shown in the confirmation
+      pop-up. Nothing is sent if the transaction is a contract deployment.
+    </li>
+    <li>
+      <strong>Token prices:</strong> To show USD values, the Extension asks <code>api.coingecko.com</code> for prices of
+      the native coins and token contract addresses in your list. Your wallet address is not included.
     </li>
     <li>
       <strong>Token icons:</strong> Token logos are fetched as static images from
       <code>raw.githubusercontent.com</code> (Trust Wallet community asset repository). GitHub may log standard request
       metadata as described in their privacy policy.
+    </li>
+    <li>
+      <strong>Swap providers (only when you use Swap):</strong> To get quotes and build swap or bridge transactions,
+      the Extension sends your wallet address, the tokens, chains and amounts you choose, and the recipient address to
+      the provider you pick: <code>xflows.wanchain.org</code> (XFlows), <code>api.relay.link</code> (Relay) or
+      <code>web3.okx.com</code> (OKX DEX). Nothing is sent to them unless you open the Swap page and request a quote.
     </li>
   </ul>
 
@@ -161,7 +184,9 @@
     <tbody>
       <tr><td><code>storage</code></td><td>To save your encrypted wallet, accounts, networks, tokens, whitelist rules and settings on your device.</td></tr>
       <tr><td><code>windows</code></td><td>To open the transaction confirmation and unlock pop-up windows next to your browser window.</td></tr>
-      <tr><td><code>notifications</code></td><td>To show desktop notifications about transaction status (e.g. submitted, confirmed, failed).</td></tr>
+      <tr><td><code>notifications</code></td><td>To show desktop notifications about transaction status (confirmed or failed).</td></tr>
+      <tr><td><code>alarms</code></td><td>To keep checking pending transactions every minute after Chrome stops and restarts the Extension's background worker, so their final status and notification are not lost. The alarm stops once no transaction is pending.</td></tr>
+      <tr><td>Host access to the services in Section 3</td><td>To call the transaction simulation, price and swap services listed above directly from the Extension.</td></tr>
       <tr><td>Host access (<code>&lt;all_urls&gt;</code>)</td><td>Required so the Extension can inject the EIP-1193 / EIP-6963 wallet provider into web pages, which is how dApps detect and talk to the wallet. The injected script does nothing until a page actively requests a wallet action.</td></tr>
     </tbody>
   </table>
@@ -169,8 +194,9 @@
   <h2>5. Security</h2>
   <ul>
     <li>Wallet secrets are encrypted with AES-256-GCM using a key derived from your password via PBKDF2 (SHA-256, 600,000 iterations) and a random per-wallet salt.</li>
-    <li>The decrypted key only exists in memory while the wallet is unlocked, and is cleared when the configurable auto-lock timeout fires or when you lock the wallet manually.</li>
-    <li>Non-whitelisted transactions require explicit user approval through a confirmation pop-up. Gas-limit and value caps are enforced as additional safety nets.</li>
+    <li>While the wallet is unlocked, the decryption key is kept only in memory (<code>chrome.storage.session</code>, which Chrome never writes to disk). Your password is never kept. The key is cleared when the configurable auto-lock timeout fires, when you lock the wallet, or when the browser closes.</li>
+    <li>A site cannot see your address or ask for signatures until you approve its connection. You can disconnect sites at any time in Settings.</li>
+    <li>Non-whitelisted transactions require explicit user approval through a confirmation pop-up. Gas-limit and value caps are enforced as additional safety nets. Auto-sign trust granted from the pop-up expires after the time you choose.</li>
     <li>The Extension uses <code>sender.origin</code> from Chrome (not the page-supplied value) to identify the calling site, which prevents origin spoofing by malicious pages.</li>
   </ul>
   <p>No system can be guaranteed to be 100% secure. You are responsible for keeping your password and seed phrase safe. If you lose them, your funds cannot be recovered.</p>
@@ -195,12 +221,12 @@
   <h2>9. Contact</h2>
   <p>
     Questions or concerns about this policy can be raised via the project’s public issue tracker:
-    <a href="https://github.com/Auto-Wallet/auto-wallet/issues">github.com/Auto-Wallet/auto-wallet/issues</a>.
+    <a href="https://github.com/Auto-Wallet/auto-wallet-extension/issues">github.com/Auto-Wallet/auto-wallet-extension/issues</a>.
   </p>
 
   <footer>
     Auto Wallet is open-source software released under the MIT License. Source code:
-    <a href="https://github.com/Auto-Wallet/auto-wallet">github.com/Auto-Wallet/auto-wallet</a>.
+    <a href="https://github.com/Auto-Wallet/auto-wallet-extension">github.com/Auto-Wallet/auto-wallet-extension</a>.
   </footer>
 </main>
 </body>
