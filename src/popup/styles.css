@@ -845,6 +845,12 @@ input[type="checkbox"]:checked::after {
   color: var(--text-muted);
   max-width: 120px;
 }
+.token-card-balance sub {
+  font-size: 0.72em;
+  line-height: 0;
+  vertical-align: sub;
+}
+
 .token-card-balance {
   font-size: 13px;
   font-weight: 650;

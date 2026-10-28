@@ -17,6 +17,8 @@ import {
   SwapIcon,
 } from '../icons';
 import { ReceiveModal } from '../ReceiveModal';
+import { TokenBalance } from '../TokenBalance';
+import { isZeroTokenBalance } from '../../lib/token-balance';
 
 type SendTarget = {
   type: 'native';
@@ -239,7 +241,7 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
         }
       }),
     );
-    setTokens(withBalances);
+    setTokens(withBalances.filter(({ balance }) => !isZeroTokenBalance(balance)));
 
     if (settings.enablePrices) {
       const queries = [
@@ -650,13 +652,12 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
 
         {tokens.length === 0 && !showAddToken && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
-            No tokens added
+            No token balances
           </div>
         )}
 
         {tokens.map(({ token, balance: b }) => {
           const isConfirming = confirmDeleteId === token.address;
-          const balanceText = typeof b === 'string' && b !== '?' ? parseFloat(b).toFixed(4) : b;
           const tokenPrice = prices[tokenPriceKey(token.chainId, token.address, token.symbol)] ?? null;
           const tokenFiat = enablePrices && tokenPrice !== null && b && b !== '?'
             ? formatFiat(parseFloat(b) * tokenPrice)
@@ -675,7 +676,7 @@ export function AccountPage({ onLock }: { onLock: () => void }) {
 
               <div className="token-card-right">
                 <div className="token-card-amount">
-                  <span className="token-card-balance mono">{balanceText}</span>
+                  <TokenBalance balance={b} />
                   {tokenFiat && <span className="token-card-fiat">{tokenFiat}</span>}
                 </div>
                 {isConfirming ? (
