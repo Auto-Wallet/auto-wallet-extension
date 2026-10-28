@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, existsSync, writeFileSync, renameSync, rmSync, readFileSync } from 'fs';
+import { copyFileSync, cpSync, mkdirSync, existsSync, writeFileSync, renameSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 const DIST = join(import.meta.dir, 'dist');
@@ -180,6 +180,7 @@ writeFileSync(join(DIST, 'ledger-picker.html'), `<!DOCTYPE html>
 
 // Copy CSS
 copyFileSync(join(import.meta.dir, 'src/popup/styles.css'), join(DIST, 'popup.css'));
+cpSync(join(import.meta.dir, 'public/token-logos'), join(DIST, 'token-logos'), { recursive: true });
 
 // Copy manifest
 copyFileSync(join(import.meta.dir, 'public/manifest.json'), join(DIST, 'manifest.json'));

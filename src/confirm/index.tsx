@@ -24,6 +24,7 @@ import type { Network } from '../types/network';
 import { findNetwork } from '../lib/network-manager.core';
 import { STORAGE_KEYS } from '../lib/storage';
 import { parseNonceInput } from '../lib/nonce';
+import { parsePersonalSignParams } from '../lib/signing';
 import { TRUST_DURATIONS_MS } from '../lib/whitelist.core';
 import '../popup/styles.css';
 
@@ -729,8 +730,8 @@ function ConfirmPage() {
         {isPersonalSign && (
           <div className="card" style={{ padding: 12 }}>
             <span className="confirm-label">Message</span>
-            <div className="confirm-data mono" style={{ marginTop: 6 }}>
-              {request.params?.[0] ?? ''}
+            <div className="confirm-data mono" style={{ marginTop: 6, whiteSpace: 'pre-wrap', wordBreak: 'normal', overflowWrap: 'anywhere' }}>
+              {parsePersonalSignParams(request.params).message}
             </div>
           </div>
         )}

@@ -1,4 +1,4 @@
-import { isHex, toHex } from 'viem';
+import { hexToBytes, isHex, toHex } from 'viem';
 import { validateSigner } from './rpc-validation';
 
 export interface PersonalSignPayload {
@@ -9,6 +9,15 @@ export interface PersonalSignPayload {
 
 export interface PersonalSignAccount {
   signMessage(args: { message: { raw: `0x${string}` } }): Promise<`0x${string}`>;
+}
+
+/** Decode readable UTF-8 only; binary or lossy text must stay visible as hex. */
+function displayMessage(message: string): string {
+  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(message)) return message;
+  const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(hexToBytes(message as `0x${string}`));
+  if (toHex(text).toLowerCase() !== message.toLowerCase()) return message;
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/u.test(text)) return message;
+  return text;
 }
 
 /**
@@ -23,7 +32,7 @@ export function parsePersonalSignParams(params: unknown[]): PersonalSignPayload 
   }
 
   return {
-    message,
+    message: displayMessage(message),
     messageHex: isHex(message) ? message : toHex(message),
     signer: typeof params[1] === 'string' ? params[1] : undefined,
   };

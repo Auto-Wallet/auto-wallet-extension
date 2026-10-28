@@ -116,7 +116,10 @@ function getIconUrls(chainId: number, address: string, symbol: string): string[]
 }
 
 function TokenIcon({ token, size = 32 }: { token: Token; size?: number }) {
-  const urls = getIconUrls(token.chainId, token.address, token.symbol);
+  const urls = [
+    ...(token.logoUrl ? [token.logoUrl] : []),
+    ...getIconUrls(token.chainId, token.address, token.symbol),
+  ];
   const [attempt, setAttempt] = useState(0);
 
   const displaySymbol = token.symbol.replace(/^wan/i, '').toUpperCase();

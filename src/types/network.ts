@@ -56,6 +56,12 @@ export const PRESET_NETWORKS: Network[] = [
   { chainId: 43113,    name: 'Avalanche Fuji',    rpcUrl: 'https://api.avax-test.network/ext/bc/C/rpc',             symbol: 'AVAX', decimals: 18, blockExplorerUrl: 'https://testnet.snowtrace.io' },
 
   // --- Others ---
+  // Networks used by the default token snapshot from auto-desktop.
+  { chainId: 146,      name: 'Sonic',             rpcUrl: 'https://rpc.soniclabs.com',                              symbol: 'S',    decimals: 18 },
+  { chainId: 196,      name: 'X Layer',           rpcUrl: 'https://rpc.xlayer.tech',                                symbol: 'OKB',  decimals: 18 },
+  { chainId: 480,      name: 'World Chain',       rpcUrl: 'https://worldchain-mainnet.g.alchemy.com/public',         symbol: 'ETH',  decimals: 18 },
+  { chainId: 592,      name: 'Astar',             rpcUrl: 'https://evm.astar.network',                               symbol: 'ASTR', decimals: 18 },
+  { chainId: 1088,     name: 'Metis',             rpcUrl: 'https://andromeda.metis.io/?owner=1088',                  symbol: 'METIS', decimals: 18 },
   { chainId: 250,      name: 'Fantom',            rpcUrl: 'https://rpc.fantom.network',                             symbol: 'FTM',  decimals: 18, blockExplorerUrl: 'https://ftmscan.com' },
   { chainId: 100,      name: 'Gnosis',            rpcUrl: 'https://rpc.gnosischain.com',                            symbol: 'xDAI', decimals: 18, blockExplorerUrl: 'https://gnosisscan.io' },
   { chainId: 59144,    name: 'Linea',             rpcUrl: 'https://rpc.linea.build',                                symbol: 'ETH',  decimals: 18, blockExplorerUrl: 'https://lineascan.build' },

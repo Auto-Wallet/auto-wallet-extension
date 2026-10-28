@@ -12,6 +12,7 @@ import { MSG_SOURCE } from '../src/types/messages';
 await import('../src/background/index');
 const keyManager = await import('../src/lib/key-manager');
 const networkManager = await import('../src/lib/network-manager');
+const { getTokens } = await import('../src/lib/token-manager');
 const connectedSites = await import('../src/lib/connected-sites');
 const { handleRpcMethod } = await import('../src/background/rpc-handler');
 
@@ -223,18 +224,22 @@ describe('connected site', () => {
   });
 
   test('watchAsset asks the user and stores the on-chain symbol/decimals', async () => {
+    const before = await getTokens();
     const seen = answerConfirms(true);
     const ok = await handleRpcMethod('wallet_watchAsset', { type: 'ERC20', options: { address: TOKEN, symbol: 'FAKE', decimals: 18 } } as any, DAPP, fg);
     expect(ok).toBe(true);
     expect(seen).toEqual(['wallet_watchAsset']);
     const tokens = fake.chrome.storage.local._dump().tokens as any[];
-    expect(tokens.map((t) => [t.chainId, t.address.toLowerCase(), t.symbol, t.decimals])).toEqual([[1, TOKEN, 'TKN', 6]]);
+    expect(tokens).toHaveLength(before.length + 1);
+    expect(tokens.slice(0, before.length)).toEqual(before);
+    expect(tokens.filter((t) => t.isCustom).map((t) => [t.chainId, t.address.toLowerCase(), t.symbol, t.decimals])).toEqual([[1, TOKEN, 'TKN', 6]]);
   });
 
-  test('watchAsset rejected → 4001 and nothing stored', async () => {
+  test('watchAsset rejected → 4001 and the token list stays unchanged', async () => {
+    const before = await getTokens();
     answerConfirms(false);
     await expectRpcError(handleRpcMethod('wallet_watchAsset', { type: 'ERC20', options: { address: TOKEN } } as any, DAPP, fg), 4001);
-    expect(fake.chrome.storage.local._dump().tokens).toBeUndefined();
+    expect(fake.chrome.storage.local._dump().tokens).toEqual(before);
   });
 
   test('internal extension pages (swap) are not subject to site connection', async () => {

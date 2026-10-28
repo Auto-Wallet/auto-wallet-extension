@@ -90,7 +90,7 @@ describe('same race in tokens, networks and settings', () => {
       tokenManager.removeToken(1, '0x0000000000000000000000000000000000000001'),
       tokenManager.saveToken(token('0x0000000000000000000000000000000000000002')),
     ]);
-    expect((await tokenManager.getTokens()).map((t) => t.address)).toEqual(['0x0000000000000000000000000000000000000002']);
+    expect((await tokenManager.getTokens()).filter((t) => t.isCustom).map((t) => t.address)).toEqual(['0x0000000000000000000000000000000000000002']);
   });
 
   test('networks: two networks added at once are both kept', async () => {

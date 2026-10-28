@@ -59,6 +59,8 @@ export const STORAGE_KEYS = {
   SEEDED_PRESET_IDS: 'seeded_preset_ids',
   WHITELIST_RULES: 'whitelist_rules',
   TOKENS: 'tokens',
+  /** Defaults already offered, keyed by chainId:lowercase address; deleted ones stay deleted. */
+  SEEDED_TOKEN_IDS: 'seeded_token_ids',
   TX_LOG: 'tx_log',
   SETTINGS: 'settings',
   PRICES_CACHE: 'prices_cache',

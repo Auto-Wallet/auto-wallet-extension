@@ -82,6 +82,9 @@ chrome.runtime.onInstalled.addListener(() => {
   networkManager.seedPresetsIfNeeded().catch((err) => {
     console.warn('[Auto-Wallet] Failed to seed preset networks:', err);
   });
+  tokenManager.seedDefaultTokensIfNeeded().catch((err) => {
+    console.warn('[Auto-Wallet] Failed to seed default tokens:', err);
+  });
 });
 
 // MV3 service workers can be started for many reasons (alarms, messages, etc.)
@@ -89,6 +92,9 @@ chrome.runtime.onInstalled.addListener(() => {
 // needs to be added.
 networkManager.seedPresetsIfNeeded().catch((err) => {
   console.warn('[Auto-Wallet] Failed to seed preset networks:', err);
+});
+tokenManager.seedDefaultTokensIfNeeded().catch((err) => {
+  console.warn('[Auto-Wallet] Failed to seed default tokens:', err);
 });
 
 // One-time migration of the legacy Address Book into watch-only accounts.

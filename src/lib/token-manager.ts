@@ -1,11 +1,13 @@
 import type { Token } from '../types/token';
-import { getItem, updateItem, STORAGE_KEYS } from './storage';
+import { getItem, setItem, updateItem, STORAGE_KEYS } from './storage';
 import { getClient } from './network-manager';
 import { erc20Abi, formatUnits, getAddress } from 'viem';
+import { DEFAULT_TOKENS } from './default-tokens';
 
 // --- Storage ---
 
 export async function getTokens(): Promise<Token[]> {
+  await seedDefaultTokensIfNeeded();
   return (await getItem<Token[]>(STORAGE_KEYS.TOKENS)) ?? [];
 }
 
@@ -18,6 +20,34 @@ function sameToken(t: Token, chainId: number, address: string): boolean {
 }
 
 // --- Public API ---
+
+function tokenKey(token: Token): string {
+  return `${token.chainId}:${token.address.toLowerCase()}`;
+}
+
+let seeding: Promise<void> | null = null;
+
+/** Seed new defaults once. Existing entries win, and deleted defaults stay deleted. */
+export function seedDefaultTokensIfNeeded(): Promise<void> {
+  if (seeding) return seeding;
+  seeding = seedDefaultTokens().finally(() => { seeding = null; });
+  return seeding;
+}
+
+async function seedDefaultTokens(): Promise<void> {
+  const seeded = new Set((await getItem<string[]>(STORAGE_KEYS.SEEDED_TOKEN_IDS)) ?? []);
+  const pending = DEFAULT_TOKENS.filter((token) => !seeded.has(tokenKey(token)));
+  if (pending.length === 0) return;
+
+  // Share the add/remove queue so seeding cannot overwrite a user edit.
+  await updateTokens((tokens) => {
+    const existing = new Set(tokens.map(tokenKey));
+    return [...tokens, ...pending.filter((token) => !existing.has(tokenKey(token)))];
+  });
+  // Record every offered default, including ones the user had already added.
+  // Write after the list so an interrupted seed can retry without losing tokens.
+  await setItem(STORAGE_KEYS.SEEDED_TOKEN_IDS, [...seeded, ...pending.map(tokenKey)]);
+}
 
 /** Fetch on-chain symbol & decimals, then store the token. */
 export async function addToken(chainId: number, address: string): Promise<Token> {
@@ -49,6 +79,7 @@ export async function fetchTokenInfo(chainId: number, address: string): Promise<
 
 /** Insert or replace a token in the user's list. */
 export async function saveToken(token: Token): Promise<void> {
+  await seedDefaultTokensIfNeeded();
   await updateTokens((tokens) =>
     tokens.some((t) => sameToken(t, token.chainId, token.address))
       ? tokens.map((t) => (sameToken(t, token.chainId, token.address) ? token : t))
@@ -61,6 +92,7 @@ export async function hasToken(chainId: number, address: string): Promise<boolea
 }
 
 export async function removeToken(chainId: number, address: string): Promise<void> {
+  await seedDefaultTokensIfNeeded();
   await updateTokens((tokens) => tokens.filter((t) => !sameToken(t, chainId, address)));
 }
 
